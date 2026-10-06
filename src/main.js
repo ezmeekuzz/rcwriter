@@ -325,6 +325,54 @@ async function runSchedule(s) {
   }
 }
 
+async function installCodex() {
+  if (codexInstalling) throw new Error('Codex is already being installed.');
+  codexInstalling = { pct: 0 };
+  broadcast();
+  try {
+    await codexInstall.install(app.getPath('userData'), ({ pct }) => {
+      codexInstalling = { pct };
+      win?.webContents.send('codex-progress', pct);
+    });
+    store.data.settings.codexPath = '';
+    codexInstalling = null;
+    return await codex.status(codexCmd());
+  } finally {
+    codexInstalling = null;
+    broadcast();
+  }
+}
+
+// Earlier versions installed only codex.exe, which can't run connected tools on
+// Windows. Reinstall the complete package automatically. The ChatGPT sign-in is
+// kept, because Codex stores it separately.
+function repairCodexIfNeeded() {
+  if (store.data.settings.codexPath || !codexInstall.needsRepair(app.getPath('userData'))) return;
+  store.log('info', 'Updating Codex so site audits can use connected tools…');
+  store.save();
+  broadcast();
+  installCodex()
+    .then((st) => {
+      store.data.subscription.chatgpt = st;
+      store.log('info', 'Codex was updated. Site audits can use connected tools again.');
+      store.save();
+      notify('Codex updated', 'Site audits with your ChatGPT subscription can use connected tools again.');
+    })
+    .catch((e) => {
+      store.log('error', `Codex couldn't be updated automatically: ${e.message} Open AI providers and click Install Codex.`);
+      store.save();
+    })
+    .finally(broadcast);
+}
+
+function codexProblem() {
+  if (store.data.settings.codexPath) return null;
+  const ud = app.getPath('userData');
+  if (codexInstalling) return 'Codex is being updated right now. Try again in a few minutes.';
+  if (codexInstall.needsRepair(ud)) return 'Codex needs to be reinstalled before audits can use tools. Open AI providers and click Install Codex.';
+  return null;
+}
+
 function codexCmd() {
   return store.data.settings.codexPath || codexInstall.installedPath(app.getPath('userData')) || 'codex';
 }
@@ -608,23 +656,7 @@ function registerIpc() {
     const st = await codex.login(codexCmd(), (url) => win?.webContents.send('login-url', url));
     return saveSub(st);
   });
-  handle('sub:install', async () => {
-    if (codexInstalling) throw new Error('Codex is already being installed.');
-    codexInstalling = { pct: 0 };
-    broadcast();
-    try {
-      await codexInstall.install(app.getPath('userData'), ({ pct }) => {
-        codexInstalling = { pct };
-        win?.webContents.send('codex-progress', pct);
-      });
-      store.data.settings.codexPath = '';
-      codexInstalling = null;
-      return saveSub(await codex.status(codexCmd()));
-    } finally {
-      codexInstalling = null;
-      broadcast();
-    }
-  });
+  handle('sub:install', async () => saveSub(await installCodex()));
   handle('sub:logout', async () => saveSub(await codex.logout(codexCmd())));
 
   // Websites
@@ -868,7 +900,7 @@ if (gotLock) {
     google = createGoogle({ store, openExternal: (u) => shell.openExternal(u) });
     builtins = createBuiltins({ store, google });
     auditor = createAuditor({
-      store, connectors: connectorMgr, builtins, providers, codex, codexCmd, onChange: broadcast,
+      store, connectors: connectorMgr, builtins, providers, codex, codexCmd, codexProblem, onChange: broadcast,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
       paths: {
         execPath: () => process.execPath,
@@ -882,6 +914,7 @@ if (gotLock) {
     applySettings({ __init: true, launchAtLogin: store.data.settings.launchAtLogin });
     scheduler.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }
+    repairCodexIfNeeded();
     // Check ChatGPT sign-in in the background if it has been used before
     if (store.data.subscription.chatgpt || store.data.writers.some((w) => w.provider === 'chatgpt')) {
       codex.status(codexCmd()).then((st) => { store.data.subscription.chatgpt = st; store.save(); broadcast(); });

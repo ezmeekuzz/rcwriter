@@ -453,7 +453,7 @@ function viewProviders() {
     ? '<span class="spinner" style="display:inline-block;vertical-align:-2px;margin-right:6px"></span>Working…'
     : !st ? 'Not checked yet.'
     : codexPct !== null || S.codexInstall.installing ? `<span class="spinner" style="display:inline-block;vertical-align:-2px;margin-right:6px"></span>Downloading Codex from OpenAI… ${codexPct ?? S.codexInstall.installing.pct ?? 0}%`
-    : !st.installed ? 'Codex isn\'t installed yet. Click Install Codex. It downloads once (about 100 MB) from OpenAI\'s official releases.'
+    : !st.installed ? 'Codex isn\'t installed yet. Click Install Codex. It downloads once (about 160 MB) from OpenAI\'s official npm package.'
     : st.loggedIn ? `Signed in with your ${esc(st.method || 'account')}. ${esc(st.version || '')}`
     : 'Codex is installed but not signed in.';
   const subPanel = `

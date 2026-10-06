@@ -28,7 +28,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const toml = (s) => JSON.stringify(String(s));
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n)}\n[…truncated ${s.length - n} characters]` : s; };
 
-function createAuditor({ store, connectors, builtins, providers, codex, codexCmd, notify, onChange, paths }) {
+function createAuditor({ store, connectors, builtins, providers, codex, codexCmd, codexProblem = () => null, notify, onChange, paths }) {
   const runs = new Map(); // runId -> live run
   let bridgeServer = null;
   let bridgeUrl = null;
@@ -238,6 +238,8 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
 
   // ---------- engines ----------
   async function runCodex(run) {
+    const problem = codexProblem();
+    if (problem) throw new Error(problem);
     const url = await ensureBridge();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcwriter-audit-'));
     const out = path.join(dir, 'report.md');
@@ -247,7 +249,8 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       '-c', `mcp_servers.rcwriter.args=[${toml(paths.gateway())}]`,
       '-c', `mcp_servers.rcwriter.env={ ELECTRON_RUN_AS_NODE = "1", RCW_BRIDGE = ${toml(url)}, RCW_TOKEN = ${toml(run.token)} }`,
       '-c', 'mcp_servers.rcwriter.default_tools_approval_mode="approve"',
-      '-c', 'mcp_servers.rcwriter.startup_timeout_sec=60',
+      '-c', 'mcp_servers.rcwriter.required=true', // wait for RCWriter's tools before the first model turn
+      '-c', 'mcp_servers.rcwriter.startup_timeout_sec=120',
       '-c', 'mcp_servers.rcwriter.tool_timeout_sec=900'];
     if (run.job.model) args.push('-m', run.job.model);
     args.push('-');
@@ -405,6 +408,12 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       run.tools = await buildToolset(job, run);
       if (!run.tools.length) throw new Error(run.notes[0] || 'None of the chosen connections offered any tools.');
       let text = job.provider === 'chatgpt' ? await runCodex(run) : await runApi(run);
+      if (!run.stopped && rec.toolCalls === 0) {
+        // A report written without a single tool call isn't based on real data.
+        throw new Error(job.provider === 'chatgpt'
+          ? "The AI couldn't use any of RCWriter's tools, so no real data was checked. Open AI providers, click Install Codex to reinstall it, then run the audit again."
+          : 'The AI didn\'t use any tools, so no real data was checked. Choose a model that supports tool use and run the audit again.');
+      }
       if (!text) text = fallbackReport(run);
       rec.reportPath = saveReport(run, text);
       rec.summary = text.replace(/^#.*$/m, '').trim().split('\n').find((l) => l.trim()) || '';
