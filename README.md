@@ -96,9 +96,8 @@ None of the providers offer an email-based login for other apps. Policies change
 
 ## Releasing a new version
 
-1. Change `version` in `package.json` (for example to 1.4.1) and commit.
-2. Tag it and push: `git tag v1.4.1 && git push origin main v1.4.1`
-3. GitHub Actions builds the Windows installer (about 10 minutes) and attaches it to a new release.
+1. Change `version` in `package.json` (for example to 1.4.1).
+2. Push to `main`. GitHub Actions builds the Windows installer (about 10 minutes) and publishes it as release `v1.4.1`. Pushing again without changing the version replaces that release's installer.
 
 ## For developers
 
