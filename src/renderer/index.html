@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:;" />
+  <title>RCWriter</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="../../assets/icon.png" alt="" width="28" height="28" />
+      <span>RCWriter</span>
+    </div>
+    <nav id="nav">
+      <button data-action="nav" data-view="today">Today</button>
+      <div class="nav-group">Article writer</div>
+      <button data-action="nav" data-view="writers">Writers</button>
+      <button data-action="nav" data-view="schedules">Schedules</button>
+      <button data-action="nav" data-view="articles">Articles</button>
+      <div class="nav-group">Site audits</div>
+      <button data-action="nav" data-view="audits">Audits</button>
+      <div class="nav-group">General</div>
+      <button data-action="nav" data-view="sites">Websites</button>
+      <button data-action="nav" data-view="providers">AI providers</button>
+      <button data-action="nav" data-view="settings">Settings</button>
+    </nav>
+    <div class="status" id="status"></div>
+  </aside>
+  <main id="main" tabindex="-1"></main>
+  <div id="modal-root"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <script src="markdown.js"></script>
+  <script src="renderer.js"></script>
+  <script src="websites.js"></script>
+  <script src="audits.js"></script>
+</body>
+</html>

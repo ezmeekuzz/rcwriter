@@ -1,0 +1,80 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
+const on = (channel) => (cb) => ipcRenderer.on(channel, (_e, payload) => cb(payload));
+
+contextBridge.exposeInMainWorld('api', {
+  getState: () => invoke('state:get'),
+  saveSettings: (patch) => invoke('settings:save', patch),
+  pickOutputDir: () => invoke('settings:pickDir'),
+  openOutputDir: () => invoke('app:openOutputDir'),
+  testNotification: () => invoke('notify:test'),
+  openLink: (url) => invoke('link:open', url),
+
+  setProvider: (id, cfg) => invoke('provider:set', id, cfg),
+  listModels: (id, refresh) => invoke('provider:models', id, refresh),
+
+  saveWriter: (w) => invoke('writer:save', w),
+  deleteWriter: (id) => invoke('writer:delete', id),
+  runWriter: (id, topic) => invoke('writer:run', id, topic),
+  pickKnowledgeFiles: () => invoke('writer:pickFiles'),
+
+  saveSchedule: (s) => invoke('schedule:save', s),
+  deleteSchedule: (id) => invoke('schedule:delete', id),
+  toggleSchedule: (id, enabled) => invoke('schedule:toggle', id, enabled),
+  previewSchedule: (s) => invoke('schedule:preview', s),
+
+  subscriptionStatus: () => invoke('sub:status'),
+  subscriptionLogin: () => invoke('sub:login'),
+  installCodex: () => invoke('sub:install'),
+  unlock: (pw) => invoke('lock:unlock', pw),
+  setPassword: (current, next) => invoke('lock:set', current, next),
+  removePassword: (current) => invoke('lock:remove', current),
+  skipPasswordSetup: () => invoke('lock:skipSetup'),
+  lockNow: () => invoke('lock:now'),
+  resetPassword: () => invoke('lock:reset'),
+  subscriptionLogout: () => invoke('sub:logout'),
+
+  wpConnect: (url, siteId) => invoke('site:wpConnect', url, siteId),
+  saveSiteManual: (site) => invoke('site:saveManual', site),
+  renameSite: (id, name) => invoke('site:rename', id, name),
+  testSite: (id) => invoke('site:test', id),
+  deleteSite: (id) => invoke('site:delete', id),
+  publishArticle: (id, siteId, opts) => invoke('article:publish', id, siteId, opts),
+
+  googleServiceAccount: () => invoke('google:serviceAccount'),
+  googleOAuth: (id, secret) => invoke('google:oauth', id, secret),
+  googleRefresh: () => invoke('google:refresh'),
+  googleDisconnect: () => invoke('google:disconnect'),
+  googlePsiKey: (key) => invoke('google:psiKey', key),
+  setSiteGoogle: (id, g) => invoke('site:setGoogle', id, g),
+  addUrlSite: (s) => invoke('site:addUrl', s),
+  saveConnector: (c) => invoke('connector:save', c),
+  connectConnector: (id) => invoke('connector:connect', id),
+  signOutConnector: (id) => invoke('connector:signOut', id),
+  deleteConnector: (id) => invoke('connector:delete', id),
+  setToolRisk: (id, tool, risk) => invoke('connector:setRisk', id, tool, risk),
+  saveAuditJob: (j) => invoke('audit:saveJob', j),
+  toggleAuditJob: (id, on) => invoke('audit:toggleJob', id, on),
+  deleteAuditJob: (id) => invoke('audit:deleteJob', id),
+  runAudit: (id) => invoke('audit:run', id),
+  stopAudit: (runId) => invoke('audit:stop', runId),
+  decideApproval: (id, approve) => invoke('audit:decide', id, approve),
+  decideApprovals: (ids, approve) => invoke('audit:decideAll', ids, approve),
+  revertChange: (id) => invoke('audit:revert', id),
+  readAuditReport: (runId) => invoke('audit:readReport', runId),
+  revealAuditReport: (runId) => invoke('audit:revealReport', runId),
+
+  readArticle: (id) => invoke('article:read', id),
+  deleteArticle: (id, removeFile) => invoke('article:delete', id, removeFile),
+  revealArticle: (id) => invoke('article:reveal', id),
+  openArticleFile: (id) => invoke('article:openFile', id),
+
+  onState: on('state'),
+  onOpenArticle: on('open-article'),
+  onNavigate: on('navigate'),
+  onToast: on('toast'),
+  onNavigateTo: on('navigate-to'),
+  onLoginUrl: on('login-url'),
+  onCodexProgress: on('codex-progress')
+});
