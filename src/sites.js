@@ -4,6 +4,8 @@
 // Webhook: POSTs the article as JSON to any URL (Zapier, Make, n8n, Ghost
 //   automations, a custom endpoint), optionally signed with HMAC-SHA256.
 const crypto = require('crypto');
+const { botBlock, BlockedError } = require('./botblock');
+const UA = 'RCWriter/1.4 (WordPress connection; +https://github.com/ezmeekuzz/rcwriter)';
 const { renderMarkdown, stripFrontMatter } = require('./renderer/markdown.js');
 
 const APP_ID = 'fe89e50f-5c34-4cb1-98b5-b1b442ae206c';
@@ -19,11 +21,13 @@ function normalizeUrl(u) {
 async function fetchJson(url, opts = {}) {
   let res, text;
   try {
-    res = await fetch(url, { ...opts, redirect: 'follow', signal: AbortSignal.timeout(60000) });
+    res = await fetch(url, { ...opts, headers: { 'User-Agent': UA, ...(opts.headers || {}) }, redirect: 'follow', signal: AbortSignal.timeout(60000) });
     text = await res.text();
   } catch (e) {
     throw new Error(`Could not reach the website (${e.name === 'TimeoutError' ? 'timed out' : e.message}).`);
   }
+  const block = botBlock(res, text);
+  if (block) throw new BlockedError(block);
   let json = null;
   try { json = JSON.parse(text); } catch { /* not JSON */ }
   return { res, json, text };
@@ -64,7 +68,10 @@ async function wpDiscover(rawUrl) {
   const site = { url };
   let root;
   try { root = await wpRequest(site, null, '/'); }
-  catch { throw new Error('That doesn\'t look like a WordPress site, or its REST API is turned off. Check the address.'); }
+  catch (e) {
+    if (e.blocked || /Could not reach/.test(e.message)) throw e;
+    throw new Error('That doesn\'t look like a WordPress site, or its REST API is turned off. Check the address.');
+  }
   const ap = root.authentication && root.authentication['application-passwords'];
   return {
     url: (root.home || url).replace(/\/+$/, '') || url,

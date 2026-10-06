@@ -3,6 +3,8 @@
 //  wp:<siteId>       WordPress        - uses the site's saved application password
 //  google:<siteId>   Google data      - Search Console, GA4, Tag Manager for the site
 const sitesLib = require('./sites');
+const { botBlock, BlockedError } = require('./botblock');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const UA = 'Mozilla/5.0 (compatible; RCWriter-SiteAudit/1.4; +https://rcwriter.app)';
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n)}…[truncated]` : s; };
@@ -29,6 +31,12 @@ async function fetchTraced(url, { method = 'GET', max = 10, timeoutMs = 30000 } 
       current = new URL(res.headers.get('location'), current).toString();
       try { await res.body?.cancel(); } catch { /* ignore */ }
       continue;
+    }
+    if (res.status === 202 || res.status === 429 || res.status === 403 || res.status === 503 || res.headers.get('sg-captcha') || res.headers.get('cf-mitigated')) {
+      const text = await res.text();
+      const block = botBlock(res, text);
+      if (block) throw new BlockedError(block);
+      return { res: new Response(text, { status: res.status, headers: res.headers }), finalUrl: current, chain, ms: Date.now() - started };
     }
     return { res, finalUrl: current, chain, ms: Date.now() - started };
   }
@@ -82,6 +90,7 @@ async function checkUrl(url) {
     try { await t.res.body?.cancel(); } catch { /* ignore */ }
     return { url, status: t.res.status, finalUrl: t.finalUrl !== url ? t.finalUrl : undefined, redirects: t.chain.length || undefined };
   } catch (e) {
+    if (e.blocked) return { url, status: 'blocked', error: `${e.blocked.provider} bot protection` };
     return { url, status: 0, error: e.name === 'TimeoutError' ? 'timed out' : String(e.cause?.code || e.message) };
   }
 }
@@ -123,9 +132,11 @@ function createBuiltins({ store, google }) {
           const seen = new Set([start]);
           const queue = [start];
           const pages = [];
-          while (queue.length && pages.length < limit) {
-            const batch = queue.splice(0, Math.min(4, limit - pages.length));
-            const results = await pool(batch, 4, async (u) => {
+          let blocked = null;
+          while (queue.length && pages.length < limit && !blocked) {
+            if (pages.length) await sleep(400); // be gentle so hosts don't flag the audit as a bot
+            const batch = queue.splice(0, Math.min(2, limit - pages.length));
+            const results = await pool(batch, 2, async (u) => {
               try {
                 const t = await fetchTraced(u, { timeoutMs: 25000 });
                 const ct = t.res.headers.get('content-type') || '';
@@ -146,23 +157,26 @@ function createBuiltins({ store, google }) {
                 if (a.imagesMissingAlt) issues.push(`${a.imagesMissingAlt} images without alt`);
                 if (a.wordCount < 250) issues.push(`thin (${a.wordCount} words)`);
                 return { url: u, status: t.res.status, title: a.title, metaDescription: a.metaDescription ? `${a.metaDescription.slice(0, 80)}${a.metaDescription.length > 80 ? '…' : ''}` : '', issues };
-              } catch (e) { return { url: u, status: 0, issues: [`could not load: ${e.cause?.code || e.message}`] }; }
+              } catch (e) {
+                if (e.blocked) { blocked = e.blocked; return { url: u, status: 'blocked', issues: [`${e.blocked.provider} bot protection challenged the request`] }; }
+                return { url: u, status: 0, issues: [`could not load: ${e.cause?.code || e.message}`] };
+              }
             });
             pages.push(...results);
           }
           const dupes = (k) => Object.entries(pages.reduce((m, p) => { if (p[k]) (m[p[k]] = m[p[k]] || []).push(p.url); return m; }, {})).filter(([, v]) => v.length > 1).map(([t, v]) => ({ [k]: t, pages: v }));
-          return json({ crawled: pages.length, notVisited: queue.length, duplicateTitles: dupes('title'), duplicateMetaDescriptions: dupes('metaDescription'), pages });
+          return json({ ...(blocked ? { stoppedEarly: `Crawl stopped: ${blocked.message}` } : {}), crawled: pages.length, notVisited: queue.length, duplicateTitles: dupes('title'), duplicateMetaDescriptions: dupes('metaDescription'), pages });
         }),
       T('find_broken_links', 'Load a page, collect every link on it (internal and external) and report the ones that are broken (4xx/5xx, unreachable) or redirect.',
         { url: { type: 'string' }, maxLinks: { type: 'number', description: 'default 80, max 200' } }, ['url'], 'read', async ({ url, maxLinks }) => {
           const t = await fetchTraced(url);
           const a = analyzeHtml(await t.res.text(), t.finalUrl);
           const all = [...a._internal, ...a._external].slice(0, Math.min(200, Number(maxLinks) || 80));
-          const results = await pool(all, 6, checkUrl);
+          const results = await pool(all, 3, checkUrl);
           return json({ page: url, checked: results.length, broken: results.filter((r) => r.status === 0 || r.status >= 400), redirected: results.filter((r) => r.redirects).slice(0, 30) });
         }),
       T('check_urls', 'Check the HTTP status of up to 100 URLs (for example old URLs, URLs from Search Console or a sitemap).',
-        { urls: { type: 'array', items: { type: 'string' } } }, ['urls'], 'read', async ({ urls }) => json(await pool((urls || []).slice(0, 100), 6, checkUrl))),
+        { urls: { type: 'array', items: { type: 'string' } } }, ['urls'], 'read', async ({ urls }) => json(await pool((urls || []).slice(0, 100), 3, checkUrl))),
       T('get_sitemap', `Read the XML sitemap of ${root} (from robots.txt or the usual locations) and list its URLs.`,
         { url: { type: 'string', description: 'Sitemap URL, optional' } }, [], 'read', async ({ url }) => {
           const candidates = url ? [url] : [];
