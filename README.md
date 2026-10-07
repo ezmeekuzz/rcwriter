@@ -49,12 +49,21 @@ A separate module (sidebar: **Site audits → Audits**) that checks your website
 
 Audits work with your ChatGPT subscription (through the same Codex sign-in as articles) or with API keys for Claude, OpenAI, Gemini or OpenAI-compatible models that support tool use. Audits use far more AI usage than articles, and each tool's own plan limits apply.
 
+### Staying off hosts' bot lists
+
+Hosts such as SiteGround, Cloudflare and Wordfence challenge or block tools that send many quick requests. Every request RCWriter makes directly to a website (audits, WordPress connections, publishing) goes through one gatekeeper:
+
+- **One request at a time per site, with a pause between requests.** Choose the pace per website on the Websites page: Normal (every 0.8s), Gentle (every 2s, the default) or Very gentle (every 5s). A longer `Crawl-delay` in the site's robots.txt is respected.
+- **No repeats:** the same page checked again within 30 minutes is answered from memory.
+- **Daily limit** on audit requests per site (600, 250 or 100 depending on the pace).
+- **Automatic back-off:** if a host challenges RCWriter or says "too many requests", RCWriter stops contacting that site directly for 6 hours (12, then 24 if it happens again), instead of retrying and making the block longer. Audits keep running with Search Console, PageSpeed, Ahrefs, Semrush and WPVibe data, which don't load the site from your computer. **Resume now** on the Websites page lifts the pause, for example after your host whitelists you.
+- **Audits prefer off-site data** and keep direct page checks to about 30 per run.
+
+No tool can promise a host will never flag it. The only guarantee is the host exempting your IP address: on SiteGround, ask support to exempt your IP from the Anti-Bot AI for the site.
+
 ## Install (Windows)
 
-**Download:** open the [latest release](https://github.com/ezmeekuzz/rcwriter/releases/latest) and download `RCWriter-Setup-x.y.z.exe`.
-
-
-1. Double-click **RCWriter-Setup-1.4.0.exe**.
+1. Double-click **RCWriter-Setup-1.5.0.exe**.
 2. Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Click **More info**, then **Run anyway**.
 3. Choose who to install for and where, then **set your password** on the "Set a password" page (or leave it empty to skip).
 4. Click **Install**, then **Finish**. RCWriter opens and asks for your password.
@@ -94,11 +103,6 @@ None of the providers offer an email-based login for other apps. Policies change
 - **Forgot it?** Click "Forgot password?" on the lock screen. This removes the password and erases saved API keys, website logins and the ChatGPT sign-in, so nobody can use your accounts. Writers, schedules and articles are kept.
 - The password stops other people using this computer from opening RCWriter. It doesn't encrypt your article files, which are normal Markdown files in your Documents folder.
 
-## Releasing a new version
-
-1. Change `version` in `package.json` (for example to 1.4.1).
-2. Push to `main`. GitHub Actions builds the Windows installer (about 10 minutes) and publishes it as release `v1.4.1`. Pushing again without changing the version replaces that release's installer.
-
 ## For developers
 
 ```bash
@@ -136,6 +140,7 @@ src/audit.js       Site audit runner and autonomy levels
 src/gateway.js     Local tool bridge used with the ChatGPT subscription
 src/builtin.js     Built-in audit tools: website checker, WordPress, Google data
 src/google.js      Search Console, GA4, Tag Manager and PageSpeed
+src/hostguard.js   Paces, caches and pauses all direct requests to websites
 src/lock.js        App password
 src/codex-install.js  One-click Codex download
 build/installer.nsh   Installer password page

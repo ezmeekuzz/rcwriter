@@ -43,6 +43,10 @@ function viewSitesShared() {
           <div class="meta">Google: ${gBits.length ? esc(gBits.join(', ')) : S.google.connected ? 'not linked yet' : 'connect Google above to link data'}</div>
           <div class="meta">Audit tools: ${builtins.length ? esc(builtins.join(', ')) : 'none'}</div>
           <div class="meta">${writers.length ? `Writers: ${esc(writers.join(', '))}` : 'No writers publish here'}${audits.length ? ` · Audits: ${esc(audits.join(', '))}` : ''}</div>
+          ${site.type !== 'webhook' ? `<div class="meta inline-pace">Request pace
+            <select data-change="site-pace" data-id="${site.id}" aria-label="Request pace for ${esc(site.name)}">${Object.entries(S.paces).map(([k, p]) => `<option value="${k}" ${site.pace === k ? 'selected' : ''}>${esc(p.label)}: 1 request every ${p.gapMs / 1000}s, up to ${p.auditPerDay} audit requests a day</option>`).join('')}</select></div>` : ''}
+          ${site.access && site.access.pausedUntil ? `<div class="paused-note"><strong>Direct requests paused until ${esc(new Date(site.access.pausedUntil).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}.</strong> ${esc(site.access.provider || 'The host')} challenged RCWriter as a possible bot, so RCWriter is giving the block time to lift. Audits use Google, Ahrefs, Semrush and WPVibe data meanwhile. If the host has whitelisted your IP address, resume now.
+            <button class="btn small" data-action="site-resume" data-id="${site.id}">Resume now</button></div>` : ''}
         </div>
         <div class="btn-row">
           ${S.google.connected ? `<button class="btn" data-action="site-google" data-id="${site.id}">Google data</button>` : ''}
@@ -142,6 +146,11 @@ function openUrlSiteModal(site) {
 
 VIEWS.sites = viewSitesShared;
 
+document.addEventListener('change', (e) => {
+  const el = e.target;
+  if (el.dataset.change === 'site-pace') attempt(() => api.setSitePace(el.dataset.id, el.value), 'Request pace saved');
+});
+
 Object.assign(ACTIONS, {
   'google-connect': () => openGoogleModal(),
   'google-tab': (el) => { modal.tab = el.dataset.tab; renderGoogleModal(); },
@@ -177,6 +186,7 @@ Object.assign(ACTIONS, {
     await attempt(() => api.setSiteGoogle(modal.siteId, { gscSite: v('#sg-gsc'), ga4Property: v('#sg-ga4'), gtmContainer: v('#sg-gtm') }), 'Google data linked');
     closeModal();
   },
+  'site-resume': (el) => attempt(() => api.resumeSite(el.dataset.id), 'Direct requests resumed'),
   'url-site-new': () => openUrlSiteModal(),
   'url-site-edit': (el) => openUrlSiteModal(S.sites.find((x) => x.id === el.dataset.id)),
   'url-site-save': async () => {

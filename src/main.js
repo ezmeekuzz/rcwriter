@@ -15,6 +15,7 @@ const { PRESETS, createConnectors } = require('./connectors');
 const { createAuditor, MODES, TEMPLATES } = require('./audit');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
+const hostGuard = require('./hostguard');
 const sites = require('./sites');
 const crypto = require('crypto');
 
@@ -172,7 +173,8 @@ function publicState() {
     settings: d.settings,
     providers: provs,
     writers: d.writers,
-    sites: d.sites.map(({ secret, ...rest }) => ({ ...rest, hasSecret: !!secret })),
+    sites: d.sites.map(({ secret, ...rest }) => ({ ...rest, hasSecret: !!secret, pace: rest.pace || 'gentle', access: hostGuard.hostStatus(hostGuard.hostOf(rest.url)) })),
+    paces: Object.fromEntries(Object.entries(hostGuard.PACES).map(([k, v]) => [k, { label: v.label, gapMs: v.gapMs, auditPerDay: v.auditPerDay }])),
     connectors: d.connectors.map(({ secret, oauthTokens, oauthClient, codeVerifier, oauthState, ...rest }) => ({ ...rest, hasSecret: !!secret, signedIn: rest.auth === 'oauth' ? !!oauthTokens : rest.auth === 'apikey' ? !!secret : true })),
     connectorPresets: PRESETS,
     google: google ? google.status() : { connected: false },
@@ -739,6 +741,18 @@ function registerIpc() {
     broadcast();
     return site.id;
   });
+  handle('site:resume', (id) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (site) { hostGuard.resume(hostGuard.hostOf(site.url)); hostGuard.clearCache(); }
+    broadcast();
+  });
+  handle('site:setPace', (id, pace) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site || !hostGuard.PACES[pace]) throw new Error('Unknown website or pace.');
+    site.pace = pace;
+    store.save();
+    broadcast();
+  });
   handle('site:delete', (id) => {
     const d = store.data;
     d.sites = d.sites.filter((x) => x.id !== id);
@@ -884,6 +898,7 @@ if (gotLock) {
 
   app.whenReady().then(() => {
     store.load();
+    hostGuard.init(store);
     if (lock.consumeInstallerPassword()) { store.data.settings.passwordPrompted = true; store.save(); }
     if (store.data.settings.lockOnHide === undefined) store.data.settings.lockOnHide = true;
     if (store.data.settings.lockAfterMinutes === undefined) store.data.settings.lockAfterMinutes = 15;

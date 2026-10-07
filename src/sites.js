@@ -5,7 +5,8 @@
 //   automations, a custom endpoint), optionally signed with HMAC-SHA256.
 const crypto = require('crypto');
 const { botBlock, BlockedError } = require('./botblock');
-const UA = 'RCWriter/1.4 (WordPress connection; +https://github.com/ezmeekuzz/rcwriter)';
+const guard = require('./hostguard');
+const UA = guard.UA;
 const { renderMarkdown, stripFrontMatter } = require('./renderer/markdown.js');
 
 const APP_ID = 'fe89e50f-5c34-4cb1-98b5-b1b442ae206c';
@@ -18,12 +19,16 @@ function normalizeUrl(u) {
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }
 
-async function fetchJson(url, opts = {}) {
+// purpose: requests to the user's own website go through the host guard
+// ('connect', 'publish' or 'audit'); webhooks (Zapier, Make…) go direct.
+async function fetchJson(url, opts = {}, purpose = null) {
   let res, text;
   try {
-    res = await fetch(url, { ...opts, headers: { 'User-Agent': UA, ...(opts.headers || {}) }, redirect: 'follow', signal: AbortSignal.timeout(60000) });
+    const init = { ...opts, headers: { 'User-Agent': UA, ...(opts.headers || {}) }, redirect: 'follow', signal: AbortSignal.timeout(60000) };
+    res = purpose ? await guard.guardedFetch(url, init, { purpose }) : await fetch(url, init);
     text = await res.text();
   } catch (e) {
+    if (e.blocked || e.paused || e.budget) throw e;
     throw new Error(`Could not reach the website (${e.name === 'TimeoutError' ? 'timed out' : e.message}).`);
   }
   const block = botBlock(res, text);
@@ -41,14 +46,14 @@ function wpUrl(base, route, query = {}, mode = 'pretty') {
   return `${base}/?rest_route=${encodeURIComponent(route)}${qs ? `&${qs}` : ''}`;
 }
 
-async function wpRequest(site, auth, route, { method = 'GET', query = {}, body } = {}) {
+async function wpRequest(site, auth, route, { method = 'GET', query = {}, body, purpose = 'publish' } = {}) {
   const headers = { Accept: 'application/json' };
   if (auth) headers.Authorization = `Basic ${Buffer.from(`${auth.user}:${auth.pass}`).toString('base64')}`;
   if (body) headers['Content-Type'] = 'application/json';
   const modes = site.restMode ? [site.restMode] : ['pretty', 'plain'];
   let last;
   for (const mode of modes) {
-    const { res, json, text } = await fetchJson(wpUrl(site.url, route, query, mode), { method, headers, body: body ? JSON.stringify(body) : undefined });
+    const { res, json, text } = await fetchJson(wpUrl(site.url, route, query, mode), { method, headers, body: body ? JSON.stringify(body) : undefined }, purpose);
     if (res.ok && json !== null) { site.restMode = mode; return json; }
     last = { res, json, text };
     if (res.status !== 404 || (json && json.code && json.code !== 'rest_no_route')) break;
@@ -67,9 +72,9 @@ async function wpDiscover(rawUrl) {
   const url = normalizeUrl(rawUrl);
   const site = { url };
   let root;
-  try { root = await wpRequest(site, null, '/'); }
+  try { root = await wpRequest(site, null, '/', { purpose: 'connect' }); }
   catch (e) {
-    if (e.blocked || /Could not reach/.test(e.message)) throw e;
+    if (e.blocked || e.paused || /Could not reach/.test(e.message)) throw e;
     throw new Error('That doesn\'t look like a WordPress site, or its REST API is turned off. Check the address.');
   }
   const ap = root.authentication && root.authentication['application-passwords'];
@@ -94,7 +99,7 @@ function wpAuthorizeUrl(authUrl, state) {
 }
 
 async function wpVerify(site, auth) {
-  const me = await wpRequest(site, auth, '/wp/v2/users/me', { query: { context: 'edit' } });
+  const me = await wpRequest(site, auth, '/wp/v2/users/me', { query: { context: 'edit' }, purpose: 'connect' });
   const caps = me.capabilities || {};
   return { userName: me.name || me.slug || auth.user, canPublish: caps.publish_posts !== false };
 }
@@ -175,7 +180,7 @@ async function publish(site, secret, article, fileText, { status = 'draft', cate
 
 async function test(site, secret) {
   if (site.type === 'url') {
-    const { res } = await fetchJson(site.url, { method: 'GET' });
+    const { res } = await fetchJson(site.url, { method: 'GET' }, 'connect');
     if (res.status >= 400) throw new Error(`The website answered ${res.status}.`);
     return { userName: null, canPublish: false };
   }

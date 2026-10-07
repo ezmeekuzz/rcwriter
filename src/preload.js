@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('api', {
   googlePsiKey: (key) => invoke('google:psiKey', key),
   setSiteGoogle: (id, g) => invoke('site:setGoogle', id, g),
   addUrlSite: (s) => invoke('site:addUrl', s),
+  resumeSite: (id) => invoke('site:resume', id),
+  setSitePace: (id, pace) => invoke('site:setPace', id, pace),
   saveConnector: (c) => invoke('connector:save', c),
   connectConnector: (id) => invoke('connector:connect', id),
   signOutConnector: (id) => invoke('connector:signOut', id),

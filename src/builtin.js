@@ -3,10 +3,13 @@
 //  wp:<siteId>       WordPress        - uses the site's saved application password
 //  google:<siteId>   Google data      - Search Console, GA4, Tag Manager for the site
 const sitesLib = require('./sites');
-const { botBlock, BlockedError } = require('./botblock');
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const guard = require('./hostguard');
 
-const UA = 'Mozilla/5.0 (compatible; RCWriter-SiteAudit/1.4; +https://rcwriter.app)';
+// All requests to websites go through the host guard: one at a time per site,
+// paced, cached for 30 minutes, with a daily limit and an automatic pause if
+// the host's bot protection pushes back.
+const get = (url, init = {}) => guard.guardedFetch(url, init, { purpose: 'audit', cacheable: true });
+const stopErr = (e) => e && (e.blocked || e.paused || e.budget);
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n)}…[truncated]` : s; };
 const strip = (h) => String(h || '').replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<noscript[\s\S]*?<\/noscript>/gi, ' ')
   .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
@@ -25,18 +28,12 @@ async function fetchTraced(url, { method = 'GET', max = 10, timeoutMs = 30000 } 
   let current = url;
   const started = Date.now();
   for (let i = 0; i <= max; i++) {
-    const res = await fetch(current, { method, redirect: 'manual', headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,*/*' }, signal: AbortSignal.timeout(timeoutMs) });
+    const res = await get(current, { method, redirect: 'manual', headers: { accept: 'text/html,application/xhtml+xml,*/*' }, signal: AbortSignal.timeout(timeoutMs) });
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
       chain.push({ url: current, status: res.status });
       current = new URL(res.headers.get('location'), current).toString();
       try { await res.body?.cancel(); } catch { /* ignore */ }
       continue;
-    }
-    if (res.status === 202 || res.status === 429 || res.status === 403 || res.status === 503 || res.headers.get('sg-captcha') || res.headers.get('cf-mitigated')) {
-      const text = await res.text();
-      const block = botBlock(res, text);
-      if (block) throw new BlockedError(block);
-      return { res: new Response(text, { status: res.status, headers: res.headers }), finalUrl: current, chain, ms: Date.now() - started };
     }
     return { res, finalUrl: current, chain, ms: Date.now() - started };
   }
@@ -90,7 +87,8 @@ async function checkUrl(url) {
     try { await t.res.body?.cancel(); } catch { /* ignore */ }
     return { url, status: t.res.status, finalUrl: t.finalUrl !== url ? t.finalUrl : undefined, redirects: t.chain.length || undefined };
   } catch (e) {
-    if (e.blocked) return { url, status: 'blocked', error: `${e.blocked.provider} bot protection` };
+    if (e.blocked) return { url, status: 'not checked', error: `${e.blocked.provider} bot protection; RCWriter paused direct requests to this site` };
+    if (e.paused || e.budget) return { url, status: 'not checked', error: e.paused ? 'direct requests to this site are paused' : 'daily request limit for this site reached' };
     return { url, status: 0, error: e.name === 'TimeoutError' ? 'timed out' : String(e.cause?.code || e.message) };
   }
 }
@@ -105,7 +103,7 @@ async function pool(items, n, fn) {
 function createBuiltins({ store, google }) {
   const site = (id) => store.data.sites.find((s) => s.id === id);
   const wpAuth = (s) => ({ user: s.username, pass: store.decrypt(s.secret) });
-  const wp = (s, route, opts) => sitesLib.wpRequest(s, wpAuth(s), route, opts);
+  const wp = (s, route, opts = {}) => sitesLib.wpRequest(s, wpAuth(s), route, { ...opts, purpose: 'audit' });
   const T = (name, description, properties, required, risk, run, extra = {}) =>
     ({ name, description, inputSchema: { type: 'object', properties, required }, risk, run, ...extra });
   const typeProp = { type: 'string', enum: ['posts', 'pages'], description: 'posts or pages' };
@@ -125,18 +123,17 @@ function createBuiltins({ store, google }) {
     return [
       T('check_page', `Fetch one page of ${root} and report status code, redirects, response time, title, meta description, robots/noindex, canonical, H1s, word count, images without alt text, link counts, Open Graph and structured data.`,
         { url: { type: 'string', description: 'Full URL. Defaults to the homepage.' } }, [], 'read', checkPage),
-      T('crawl_site', `Crawl up to 50 internal pages of ${root}, starting from a URL (default homepage), and summarise SEO issues per page: errors, missing or duplicate titles and meta descriptions, missing H1, noindex, canonical pointing elsewhere, images without alt text.`,
-        { startUrl: { type: 'string' }, maxPages: { type: 'number', description: '1-50, default 25' } }, [], 'read', async ({ startUrl, maxPages }) => {
-          const limit = Math.max(1, Math.min(50, Number(maxPages) || 25));
+      T('crawl_site', `Crawl up to 30 internal pages of ${root}, starting from a URL (default homepage), and summarise SEO issues per page: errors, missing or duplicate titles and meta descriptions, missing H1, noindex, canonical pointing elsewhere, images without alt text. Pages are fetched slowly, one at a time, so the host doesn't flag RCWriter as a bot: prefer Search Console, Ahrefs or Semrush crawl data when available and crawl only what they don't cover.`,
+        { startUrl: { type: 'string' }, maxPages: { type: 'number', description: '1-30, default 15' } }, [], 'read', async ({ startUrl, maxPages }) => {
+          const limit = Math.max(1, Math.min(30, Number(maxPages) || 15));
           const start = startUrl || `${root}/`;
           const seen = new Set([start]);
           const queue = [start];
           const pages = [];
           let blocked = null;
           while (queue.length && pages.length < limit && !blocked) {
-            if (pages.length) await sleep(400); // be gentle so hosts don't flag the audit as a bot
-            const batch = queue.splice(0, Math.min(2, limit - pages.length));
-            const results = await pool(batch, 2, async (u) => {
+            const batch = queue.splice(0, 1);
+            const results = await pool(batch, 1, async (u) => {
               try {
                 const t = await fetchTraced(u, { timeoutMs: 25000 });
                 const ct = t.res.headers.get('content-type') || '';
@@ -158,7 +155,7 @@ function createBuiltins({ store, google }) {
                 if (a.wordCount < 250) issues.push(`thin (${a.wordCount} words)`);
                 return { url: u, status: t.res.status, title: a.title, metaDescription: a.metaDescription ? `${a.metaDescription.slice(0, 80)}${a.metaDescription.length > 80 ? '…' : ''}` : '', issues };
               } catch (e) {
-                if (e.blocked) { blocked = e.blocked; return { url: u, status: 'blocked', issues: [`${e.blocked.provider} bot protection challenged the request`] }; }
+                if (stopErr(e)) { blocked = { message: e.message }; return { url: u, status: 'not checked', issues: [e.blocked ? `${e.blocked.provider} bot protection challenged the request` : 'direct requests paused'] }; }
                 return { url: u, status: 0, issues: [`could not load: ${e.cause?.code || e.message}`] };
               }
             });
@@ -172,41 +169,41 @@ function createBuiltins({ store, google }) {
           const t = await fetchTraced(url);
           const a = analyzeHtml(await t.res.text(), t.finalUrl);
           const all = [...a._internal, ...a._external].slice(0, Math.min(200, Number(maxLinks) || 80));
-          const results = await pool(all, 3, checkUrl);
+          const results = await pool(all, 4, checkUrl); // the guard keeps each site to one request at a time
           return json({ page: url, checked: results.length, broken: results.filter((r) => r.status === 0 || r.status >= 400), redirected: results.filter((r) => r.redirects).slice(0, 30) });
         }),
       T('check_urls', 'Check the HTTP status of up to 100 URLs (for example old URLs, URLs from Search Console or a sitemap).',
-        { urls: { type: 'array', items: { type: 'string' } } }, ['urls'], 'read', async ({ urls }) => json(await pool((urls || []).slice(0, 100), 3, checkUrl))),
+        { urls: { type: 'array', items: { type: 'string' } } }, ['urls'], 'read', async ({ urls }) => json(await pool((urls || []).slice(0, 100), 4, checkUrl))),
       T('get_sitemap', `Read the XML sitemap of ${root} (from robots.txt or the usual locations) and list its URLs.`,
         { url: { type: 'string', description: 'Sitemap URL, optional' } }, [], 'read', async ({ url }) => {
           const candidates = url ? [url] : [];
           if (!url) {
             try {
-              const r = await fetch(`${root}/robots.txt`, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(15000) });
+              const r = await get(`${root}/robots.txt`, { signal: AbortSignal.timeout(15000) });
               if (r.ok) candidates.push(...[...(await r.text()).matchAll(/^\s*sitemap:\s*(\S+)/gim)].map((m) => m[1]));
-            } catch { /* none */ }
+            } catch (e) { if (stopErr(e)) throw e; }
             candidates.push(`${root}/sitemap.xml`, `${root}/sitemap_index.xml`, `${root}/wp-sitemap.xml`);
           }
           for (const c of [...new Set(candidates)]) {
             try {
-              const r = await fetch(c, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20000) });
+              const r = await get(c, { signal: AbortSignal.timeout(20000) });
               if (!r.ok) continue;
               const xml = await r.text();
               const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]);
               if (/<sitemapindex/i.test(xml)) {
                 const urls = [];
                 for (const child of locs.slice(0, 8)) {
-                  try { const cx = await (await fetch(child, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20000) })).text(); urls.push(...[...cx.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1])); } catch { /* skip */ }
+                  try { const cx = await (await get(child, { signal: AbortSignal.timeout(20000) })).text(); urls.push(...[...cx.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1])); } catch (e) { if (stopErr(e)) throw e; }
                 }
                 return json({ sitemap: c, type: 'index', childSitemaps: locs, urlCount: urls.length, urls: urls.slice(0, 500) });
               }
               return json({ sitemap: c, type: 'urlset', urlCount: locs.length, urls: locs.slice(0, 500) });
-            } catch { /* next */ }
+            } catch (e) { if (stopErr(e)) throw e; }
           }
           return 'No sitemap found in robots.txt, /sitemap.xml, /sitemap_index.xml or /wp-sitemap.xml.';
         }),
       T('get_robots_txt', `Read ${root}/robots.txt.`, {}, [], 'read', async () => {
-        const r = await fetch(`${root}/robots.txt`, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(15000) });
+        const r = await get(`${root}/robots.txt`, { signal: AbortSignal.timeout(15000) });
         return r.ok ? clip(await r.text(), 8000) : `robots.txt returned HTTP ${r.status}`;
       }),
       T('pagespeed', 'Run Google PageSpeed Insights (Lighthouse) for a URL: performance score, LCP, CLS, TBT, page weight, real-user Core Web Vitals and the biggest opportunities such as unused CSS/JS.',
@@ -219,7 +216,7 @@ function createBuiltins({ store, google }) {
     const get = async (type, id) => wp(s, `/wp/v2/${type}/${Number(id)}`, { query: { context: 'edit' } });
     return [
       T('wp_site_overview', `Basic facts about the WordPress site ${s.url}: name, tagline, SEO plugin in use and what the connected user may do.`, {}, [], 'read', async () => {
-        const root = await sitesLib.wpRequest(s, null, '/');
+        const root = await sitesLib.wpRequest(s, null, '/', { purpose: 'audit' });
         let me = {};
         try { me = await wp(s, '/wp/v2/users/me', { query: { context: 'edit' } }); } catch { /* ignore */ }
         const ns = root.namespaces || [];
