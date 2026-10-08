@@ -21,7 +21,7 @@ function dueAt(timeStr, base = new Date()) {
   return t;
 }
 
-function createAutomation({ store, ai, guser, google, builtins, reports, notify, onChange, upcoming, distribution = null }) {
+function createAutomation({ store, ai, guser, google, builtins, reports, notify, onChange, upcoming, distribution = null, blocked = null }) {
   const d = () => store.data;
   const st = () => d().autoState || (d().autoState = {});
   const busy = new Set();
@@ -342,7 +342,7 @@ function createAutomation({ store, ai, guser, google, builtins, reports, notify,
 
   function tick() {
     const D = d();
-    if (!D || D.settings.paused) return;
+    if (!D || D.settings.paused || (blocked && blocked())) return;
     const now = new Date();
     const dg = D.settings.digest || {};
     if (dg.enabled && st().lastDigestOn !== today() && now >= dueAt(dg.time || '08:00')) once('Daily digest', () => runDigest());

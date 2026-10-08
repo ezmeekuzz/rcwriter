@@ -1,11 +1,15 @@
 {
   "name": "rcwriter",
   "productName": "RCWriter",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Desktop app that writes articles on a schedule using Claude, ChatGPT, Gemini or any OpenAI-compatible model.",
   "main": "src/main.js",
-  "author": "You",
-  "license": "MIT",
+  "author": {
+    "name": "Rustom Codilan",
+    "url": "https://tomdigitalspace.com/"
+  },
+  "homepage": "https://tomdigitalspace.com/",
+  "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
@@ -16,11 +20,13 @@
   "devDependencies": {
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "javascript-obfuscator": "^4.2.2",
     "resedit": "^1.7.2"
   },
   "build": {
     "appId": "com.rcwriter.app",
     "productName": "RCWriter",
+    "copyright": "Copyright © 2026 Rustom Codilan. All rights reserved.",
     "files": [
       "src/**/*",
       "assets/**/*",

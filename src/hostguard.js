@@ -17,7 +17,7 @@ const { botBlock, BlockedError } = require('./botblock');
 // RCWriter names itself without pretending to be, or resembling, a browser.
 let VERSION = '1.5';
 try { VERSION = require('../package.json').version; } catch { /* keep default */ }
-const UA = `RCWriter/${VERSION} (+https://github.com/ezmeekuzz/rcwriter)`;
+const UA = `RCWriter/${VERSION} (+https://tomdigitalspace.com/)`;
 const PACES = {
   normal: { label: 'Normal', gapMs: 800, auditPerDay: 600 },
   gentle: { label: 'Gentle', gapMs: 2000, auditPerDay: 250 },

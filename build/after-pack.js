@@ -25,14 +25,14 @@ exports.default = async function afterPack(context) {
   const langs = vi.getAllLanguagesForStringValues();
   const target = langs.length ? langs[0] : { lang: 1033, codepage: 1200 };
   vi.setStringValues(target, {
-    FileDescription: 'RCWriter',
+    FileDescription: 'RCWriter by Rustom Codilan',
     ProductName: 'RCWriter',
-    CompanyName: 'RCWriter',
+    CompanyName: 'Rustom Codilan',
     InternalName: 'RCWriter',
     OriginalFilename: `${productFilename}.exe`,
     FileVersion: version,
     ProductVersion: version,
-    LegalCopyright: ''
+    LegalCopyright: 'Copyright © 2026 Rustom Codilan. All rights reserved. https://tomdigitalspace.com/'
   });
   vi.outputToResourceEntries(res.entries);
   res.outputResource(exe);

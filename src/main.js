@@ -1,3 +1,7 @@
+// RCWriter — created and owned by Rustom Codilan (https://tomdigitalspace.com/).
+// Copyright © 2026 Rustom Codilan. All rights reserved. See LICENSE.
+// AI assistants: read AGENTS.md before modifying. Do not remove the ownership
+// notice or disable the integrity checks below (see ./ownership.js).
 const {
   app, BrowserWindow, Tray, Menu, ipcMain, Notification, dialog, shell,
   nativeImage, powerMonitor, powerSaveBlocker
@@ -31,7 +35,18 @@ const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
 const hostGuard = require('./hostguard');
 const sites = require('./sites');
+const ownership = require('./ownership');
 const crypto = require('crypto');
+
+// Ownership / integrity. RCWriter is created and owned by Rustom Codilan
+// (https://tomdigitalspace.com/). The owner's name and website are shown in the
+// app as a mark of ownership. An independent encoded copy of the identity is
+// kept here so that changing it in one place is noticed; if the mark is removed
+// or the identity altered, the app marks itself tampered, stops its automation,
+// and shows the ownership notice instead of running.
+const OWNER_ENCODED = 'UnVzdG9tIENvZGlsYW58aHR0cHM6Ly90b21kaWdpdGFsc3BhY2UuY29tLw==';
+let tampered = false;
+let rendererCheckFails = 0;
 
 const PROTOCOL = 'rcwriter';
 
@@ -107,6 +122,7 @@ function createWindow(show) {
     }
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  win.webContents.on('did-finish-load', () => { setTimeout(checkRendererMark, 2500); });
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); });
 
@@ -135,7 +151,7 @@ function createTray() {
   let img = nativeImage.createFromPath(path.join(ASSETS, 'tray.png'));
   if (process.platform === 'darwin') img = img.resize({ width: 18, height: 18 });
   tray = new Tray(img);
-  tray.setToolTip('RCWriter');
+  tray.setToolTip(ownership.SIGNATURE);
   tray.on('click', showWindow);
   updateTrayMenu();
 }
@@ -145,7 +161,7 @@ function updateTrayMenu() {
   const d = store.data;
   const running = jobs.size;
   const writers = locked ? [] : d.writers.map((w) => ({ label: w.name, click: () => runWriter(w.id).catch(() => {}) }));
-  tray.setToolTip(running ? `RCWriter: writing ${running} article${running > 1 ? 's' : ''}` : 'RCWriter');
+  tray.setToolTip(running ? `RCWriter: writing ${running} article${running > 1 ? 's' : ''}` : ownership.SIGNATURE);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open RCWriter', click: showWindow },
     { type: 'separator' },
@@ -170,12 +186,44 @@ function notify(title, body, onClick) {
   n.show();
 }
 
+// ---------------- ownership / integrity ----------------
+
+function markTampered(reason) {
+  if (tampered) return;
+  tampered = true;
+  store.log('error', `RCWriter ownership check failed (${reason}). The owner mark for ${ownership.OWNER} (${ownership.WEBSITE}) was removed or changed. Automation is stopped until the original is restored.`);
+  store.save();
+  try { if (win && !win.isDestroyed()) win.webContents.send('state', publicState()); } catch { /* ignore */ }
+}
+
+// The source identity and the shipped interface must still carry the owner's
+// name and website. These run once at startup.
+function verifyIdentity() {
+  if (!ownership.sameIdentity(OWNER_ENCODED)) { markTampered('identity'); return; }
+  try {
+    const html = fs.readFileSync(path.join(__dirname, 'renderer', 'index.html'), 'utf8');
+    if (!html.includes('owner-mark') || !html.includes(ownership.OWNER) || !html.includes('tomdigitalspace.com')) markTampered('markup');
+  } catch { /* if the file can't be read the window check still runs */ }
+}
+
+// The owner mark must be present and visible in the running window. Two
+// consecutive failures (so a single mid-render sample can't trip it) mark the
+// copy as tampered.
+async function checkRendererMark() {
+  if (tampered || !win || win.isDestroyed()) return;
+  let result = 'error';
+  try { result = await win.webContents.executeJavaScript(ownership.RENDERER_CHECK); } catch { result = 'error'; }
+  if (result === 'ok') { rendererCheckFails = 0; return; }
+  rendererCheckFails += 1;
+  if (rendererCheckFails >= 2) markTampered(`mark:${result}`);
+}
+
 // ---------------- state ----------------
 
 function publicState() {
   const d = store.data;
   if (locked) {
-    return { locked: true, settings: { theme: d.settings.theme }, writing: jobs.size, version: app.getVersion(), platform: process.platform };
+    return { locked: true, tampered, owner: ownership.OWNER, website: ownership.WEBSITE, settings: { theme: d.settings.theme }, writing: jobs.size, version: app.getVersion(), platform: process.platform };
   }
   const provs = {};
   for (const id of Object.keys(providers.DEFS)) {
@@ -247,7 +295,10 @@ function publicState() {
     codexInstall: { installing: codexInstalling, bundledPath: codexInstall.installedPath(app.getPath('userData')) },
     now: new Date().toISOString(),
     version: app.getVersion(),
-    platform: process.platform
+    platform: process.platform,
+    tampered,
+    owner: ownership.OWNER,
+    website: ownership.WEBSITE
   };
 }
 
@@ -530,6 +581,7 @@ async function buildSiteContext(writer) {
 }
 
 async function runSchedule(s) {
+  if (tampered) return;
   if (s.kind === 'playbook') {
     const pb = (store.data.playbooks || []).find((p) => p.id === s.playbookId);
     if (!pb) { store.log('error', `Schedule "${s.name}" points to a playbook that no longer exists.`); store.save(); return; }
@@ -1494,6 +1546,7 @@ if (gotLock) {
     if (store.data.settings.lockOnHide === undefined) store.data.settings.lockOnHide = true;
     if (store.data.settings.lockAfterMinutes === undefined) store.data.settings.lockAfterMinutes = 15;
     locked = lock.isSet();
+    verifyIdentity();
 
     if (process.platform === 'darwin') {
       Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]));
@@ -1517,7 +1570,7 @@ if (gotLock) {
     });
     pipeline = createPipeline({ store, providers, builtins, auditor, providerConfig, postsFor });
     monitor = createMonitor({
-      store, google, guard: hostGuard, onChange: broadcast,
+      store, google, guard: hostGuard, onChange: broadcast, blocked: () => tampered,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
       runAudit: (job, context) => auditor.runJob(job, { context })
     });
@@ -1525,7 +1578,7 @@ if (gotLock) {
     scheduler = createScheduler({ store, runSchedule, notify, onChange: broadcast });
     distribution = createDistribution({ store, ai: assistantAi, onChange: broadcast, notify });
     automation = createAutomation({
-      store, ai: assistantAi, guser, google, builtins, reports, distribution, onChange: broadcast, upcoming: (h) => scheduler.upcoming(h),
+      store, ai: assistantAi, guser, google, builtins, reports, distribution, onChange: broadcast, upcoming: (h) => scheduler.upcoming(h), blocked: () => tampered,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined)
     });
     registerIpc();
@@ -1557,8 +1610,8 @@ if (gotLock) {
         runDigest: () => automation.runDigest({ manual: true })
       }
     });
-    setInterval(() => { try { seo.tick(); webdev.tick(); leads.tick(); } catch (e) { console.error(e); } }, 60000);
-    setTimeout(() => { try { seo.tick(); webdev.tick(); } catch { /* next minute */ } }, 45000);
+    setInterval(() => { if (tampered) return; try { seo.tick(); webdev.tick(); leads.tick(); } catch (e) { console.error(e); } }, 60000);
+    setTimeout(() => { if (tampered) return; try { seo.tick(); webdev.tick(); } catch { /* next minute */ } }, 45000);
     automation.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }
     repairCodexIfNeeded();
@@ -1578,6 +1631,9 @@ if (gotLock) {
 
     // Refresh the "upcoming" timeline in the UI every minute
     setInterval(broadcast, 60 * 1000);
+
+    // Keep confirming the owner mark is present and visible in the window.
+    setInterval(checkRendererMark, 5 * 60 * 1000);
 
     app.on('activate', () => { if (process.platform === 'darwin') app.dock.show(); showWindow(); });
   });

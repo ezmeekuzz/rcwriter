@@ -1,3 +1,9 @@
+; Ownership: RCWriter is created and owned by Rustom Codilan
+; (https://tomdigitalspace.com/). This line shows at the bottom of the installer.
+!macro customHeader
+  BrandingText "RCWriter by Rustom Codilan · tomdigitalspace.com"
+!macroend
+
 ; RCWriter installer additions: a page to choose the app password.
 ; The password is handed to the app through a one-time file in the user's
 ; RCWriter data folder. The app hashes it on first launch and deletes the file.

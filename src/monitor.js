@@ -22,7 +22,7 @@ function certInfo(host) {
   });
 }
 
-function createMonitor({ store, google, guard, notify, runAudit, onChange }) {
+function createMonitor({ store, google, guard, notify, runAudit, onChange, blocked = null }) {
   const busy = new Set();
   let timer = null;
 
@@ -136,7 +136,7 @@ function createMonitor({ store, google, guard, notify, runAudit, onChange }) {
   }
 
   function tick() {
-    if (!store.data || store.data.settings.paused) return;
+    if (!store.data || store.data.settings.paused || (blocked && blocked())) return;
     for (const site of store.data.sites || []) {
       if (site.monitor && site.monitor.enabled) checkSite(site).catch(() => {});
     }

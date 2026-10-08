@@ -80,7 +80,10 @@ function nextHour() { const d = new Date(); d.setHours(d.getHours() + 1, 0, 0, 0
 
 // ---------- rendering ----------
 let shownGate = null;
+const OWNER_LINE = '<a class="owner-mark gate-owner" href="#" data-action="link" data-url="https://tomdigitalspace.com/">RCWriter by <strong>Rustom Codilan</strong> · tomdigitalspace.com</a>';
+
 function gateKind() {
+  if (S.tampered) return 'tampered';
   if (S.locked) return 'lock';
   if (!S.security.hasPassword && !S.settings.passwordPrompted) return 'setup';
   return null;
@@ -97,7 +100,7 @@ function render() {
   pendingRender = false;
   document.documentElement.dataset.theme = S.settings.theme === 'system' ? '' : S.settings.theme;
   shownGate = gateKind();
-  const gate = shownGate === 'lock' ? lockScreen() : shownGate === 'setup' ? setupScreen() : null;
+  const gate = shownGate === 'tampered' ? tamperedScreen() : shownGate === 'lock' ? lockScreen() : shownGate === 'setup' ? setupScreen() : null;
   document.body.classList.toggle('gated', !!gate);
   if (gate) {
     if (modal) closeModal();
@@ -269,6 +272,7 @@ function lockScreen() {
         <button class="btn primary" type="submit">Unlock</button>
       </form>
       <button class="btn ghost small" data-action="forgot-password">Forgot password?</button>
+      ${OWNER_LINE}
     </div>`;
 }
 
@@ -286,6 +290,18 @@ function setupScreen() {
         <button class="btn primary" type="submit">Set password</button>
       </form>
       <button class="btn ghost small" data-action="skip-password">Skip for now</button>
+      ${OWNER_LINE}
+    </div>`;
+}
+
+function tamperedScreen() {
+  return `
+    <div class="gate">
+      <img src="../../assets/icon.png" alt="" width="56" height="56">
+      <h1>This copy of RCWriter has been modified</h1>
+      <p class="muted">RCWriter is created and owned by <strong>Rustom Codilan</strong>. The ownership notice was removed or hidden, so this copy has stopped. Schedules, audits and outreach are paused, and your data is untouched.</p>
+      <p class="muted">Install the original from the owner to keep using it.</p>
+      ${OWNER_LINE}
     </div>`;
 }
 
@@ -600,6 +616,12 @@ function viewSettings() {
         <select id="theme" data-setting="theme">${['system', 'light', 'dark'].map((t) => `<option value="${t}" ${s.theme === t ? 'selected' : ''}>${t === 'system' ? 'Match system' : t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select>
       </div>
       <p class="muted small">RCWriter ${esc(S.version)}</p>
+    </section>
+    <section class="panel">
+      <h3>About</h3>
+      <p><strong>RCWriter</strong> is created and owned by <strong>Rustom Codilan</strong>.</p>
+      <p class="small"><a href="#" data-action="link" data-url="https://tomdigitalspace.com/">tomdigitalspace.com</a></p>
+      <p class="muted small">Copyright © 2026 Rustom Codilan. All rights reserved. This software is licensed, not sold. Copying, modifying, reverse engineering, redistributing or reselling it without the owner's written permission is not allowed.</p>
     </section>`;
 }
 
