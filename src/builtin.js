@@ -101,7 +101,7 @@ async function pool(items, n, fn) {
   return out;
 }
 
-function createBuiltins({ store, google, guser = null }) {
+function createBuiltins({ store, google, guser = null, socialTools = null }) {
   const site = (id) => store.data.sites.find((s) => s.id === id);
   const wpAuth = (s) => ({ user: s.username, pass: store.decrypt(s.secret) });
   const wp = (s, route, opts = {}) => sitesLib.wpRequest(s, wpAuth(s), route, { ...opts, purpose: 'audit' });
@@ -370,6 +370,7 @@ function createBuiltins({ store, google, guser = null }) {
     else if (kind === 'wp' && s) tools = wpTools(s);
     else if (kind === 'google' && s) tools = googleTools(s);
     else if (kind === 'gbp' && s && s.gbp && guser) tools = gbpTools(s);
+    else if (kind === 'social' && socialTools) tools = socialTools();
     return tools.find((t) => t.name === toolName) || null;
   }
 

@@ -18,6 +18,7 @@ const { createMonitor, DEFAULTS: MONITOR_DEFAULTS } = require('./monitor');
 const { createGoogleUser } = require('./googleuser');
 const { createReports } = require('./reports');
 const { createAutomation } = require('./automation');
+const { createDistribution } = require('./distribution');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -44,6 +45,7 @@ let monitor = null;
 let guser = null;
 let reports = null;
 let automation = null;
+let distribution = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
 let locked = false;
@@ -191,6 +193,7 @@ function publicState() {
     digests: (d.digests || []).slice(0, 7),
     reports: (d.reports || []).slice(0, 200),
     googleUser: guser ? guser.status() : { connected: false },
+    distribution: distribution ? distribution.status() : {},
     assistantAi: assistantChoice(),
     paces: Object.fromEntries(Object.entries(hostGuard.PACES).map(([k, v]) => [k, { label: v.label, gapMs: v.gapMs, auditPerDay: v.auditPerDay }])),
     connectors: d.connectors.map(({ secret, oauthTokens, oauthClient, codeVerifier, oauthState, ...rest }) => ({ ...rest, hasSecret: !!secret, signedIn: rest.auth === 'oauth' ? !!oauthTokens : rest.auth === 'apikey' ? !!secret : true })),
@@ -272,6 +275,29 @@ async function htmlToPdf(html) {
   }
 }
 
+// Puts an action in the approval queue, or runs it now when mode is 'auto'.
+// The tool must be resolvable by builtins.resolve(connectorId, tool).
+async function queueAction(a, mode) {
+  const d = store.data;
+  const base = { jobId: null, runId: null, siteUrl: '', siteId: null, risk: 'approval', ...a };
+  if (mode === 'auto') {
+    const t = builtins.resolve(base.connectorId, base.tool);
+    if (!t) throw new Error(`Unknown action ${base.tool}.`);
+    const r = await t.run(base.args);
+    d.changes.unshift({ id: store.uid(), ...base, via: 'automation', status: 'applied', result: r.text, before: r.before, at: new Date().toISOString() });
+    return 'applied';
+  }
+  d.approvals.unshift({ id: store.uid(), ...base, status: 'pending', createdAt: new Date().toISOString(), note: '' });
+  return 'queued';
+}
+
+async function shareOnSocial(article, writer) {
+  const site = store.data.sites.find((x) => x.id === (article.published && article.published.siteId)) || {};
+  return distribution.shareArticle(article, writer, {
+    queue: (a, mode) => queueAction({ ...a, connectorId: 'social:all', connectorName: 'Social', jobName: `Social posts: ${writer.name}`, siteId: site.id || null, siteUrl: (site.url || '').replace(/^https?:\/\//, ''), articleId: article.id }, mode)
+  });
+}
+
 // ---------------- running writers ----------------
 
 function providerConfig(id) {
@@ -347,6 +373,11 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
         const pub = await publishArticle(article.id, writer.siteId, { status, categories: writer.wpCategories, tags: writer.wpTags });
         publishNote += `\n${pub.status === 'publish' ? 'Published' : pub.status === 'sent' ? 'Sent' : `Saved as ${pub.status}`} on ${pub.siteName}`;
         const site = d.sites.find((x) => x.id === writer.siteId);
+        if (pub.status === 'publish' && writer.social && writer.social.enabled) {
+          shareOnSocial(article, writer).then((r) => {
+            if (r) store.log('publish', r.applied ? `Shared "${article.title}" on social (${r.applied} post${r.applied > 1 ? 's' : ''}).` : `${r.queued} social post${r.queued > 1 ? 's' : ''} for "${article.title}" ${r.queued > 1 ? 'are' : 'is'} waiting for your approval.`, { articleId: article.id });
+          }).catch((e) => note(`couldn't prepare social posts: ${e.message}`)).finally(() => { store.save(); broadcast(); });
+        }
         if (pub.status === 'publish' && site && site.gbp && site.gbp.postFromArticles && site.gbp.postFromArticles !== 'off') {
           automation.postFromArticle(article, site).then((r) => {
             if (r) store.log('publish', r === 'applied' ? `Posted "${article.title}" on Google Business Profile.` : `A Google Business Profile post about "${article.title}" is waiting for your approval.`, { articleId: article.id });
@@ -630,6 +661,7 @@ function registerIpc() {
     d.google = { psiKey: null };
     d.images = { model: (d.images && d.images.model) || 'gpt-image-1' };
     d.googleUser = { clientId: (d.googleUser && d.googleUser.clientId) || '' };
+    d.distribution = { webhookUrl: (d.distribution && d.distribution.webhookUrl) || '' };
     for (const c of d.connectors) {
       delete c.oauthTokens; delete c.oauthClient; delete c.codeVerifier; c.secret = null;
       c.lastError = 'Sign in again. Saved sign-ins were erased when the password was reset.';
@@ -908,7 +940,7 @@ function registerIpc() {
     let client = c.id && d.clients.find((x) => x.id === c.id);
     if (!client) { client = { id: store.uid(), createdAt: new Date().toISOString() }; d.clients.push(client); }
     Object.assign(client, { name: String(c.name).trim(), contact: String(c.contact || '').trim(), email: String(c.email || '').trim(), notes: String(c.notes || '') });
-    for (const k of ['monthlyReport', 'weeklyUpdate', 'emailTasks', 'reportFormats']) if (k in c) client[k] = c[k];
+    for (const k of ['monthlyReport', 'weeklyUpdate', 'emailTasks', 'reportFormats', 'newsletter']) if (k in c) client[k] = c[k];
     if (Array.isArray(c.siteIds)) {
       for (const site of d.sites) {
         if (c.siteIds.includes(site.id)) site.clientId = client.id;
@@ -1160,6 +1192,27 @@ function registerIpc() {
     shell.showItemInFolder(r.exports.pdf || r.exports.docx);
     return r.exports;
   });
+  // ---------- Release 3: social and newsletter ----------
+  handle('dist:configure', (patch) => { distribution.configure(patch || {}); broadcast(); });
+  handle('dist:bufferProfiles', async () => { try { return await distribution.bufferProfiles(); } finally { broadcast(); } });
+  handle('dist:mailchimpLists', async () => { try { return await distribution.mailchimpLists(); } finally { broadcast(); } });
+  handle('article:share', async (id) => {
+    const d = store.data;
+    const a = d.articles.find((x) => x.id === id);
+    if (!a || !a.published || a.published.status !== 'publish') throw new Error('Publish the article first, so the posts can link to it.');
+    const writer = d.writers.find((w) => w.id === a.writerId);
+    if (!writer || !writer.social || !writer.social.enabled) throw new Error('Turn on social sharing for this article\'s writer first (edit the writer, Share on social).');
+    try { return await shareOnSocial(a, writer); } finally { store.save(); broadcast(); }
+  });
+  handle('client:newsletterNow', async (id) => {
+    const c = (store.data.clients || []).find((x) => x.id === id);
+    if (!c) throw new Error('Client not found.');
+    try {
+      const r = await distribution.monthlyNewsletter(c, { offset: -1 });
+      if (r.mailchimp && r.mailchimp.url) shell.openExternal(r.mailchimp.url); else shell.openPath(r.files.html);
+      return r;
+    } finally { broadcast(); }
+  });
   handle('images:set', (cfg = {}) => {
     const d = store.data;
     d.images = d.images || {};
@@ -1197,7 +1250,7 @@ if (gotLock) {
     connectorMgr = createConnectors(store);
     google = createGoogle({ store, openExternal: (u) => shell.openExternal(u) });
     guser = createGoogleUser({ store, openExternal: (u) => shell.openExternal(u) });
-    builtins = createBuiltins({ store, google, guser });
+    builtins = createBuiltins({ store, google, guser, socialTools: () => (distribution ? distribution.tools() : []) });
     auditor = createAuditor({
       store, connectors: connectorMgr, builtins, providers, codex, codexCmd, codexProblem, onChange: broadcast,
       afterRun: (job, rec, text) => automation.afterAudit(job, rec, text),
@@ -1215,8 +1268,9 @@ if (gotLock) {
     });
     reports = createReports({ store, google, ai: assistantAi, htmlToPdf, monitorStatus: (id) => (monitor ? monitor.status(id) : null) });
     scheduler = createScheduler({ store, runSchedule, notify, onChange: broadcast });
+    distribution = createDistribution({ store, ai: assistantAi, onChange: broadcast, notify });
     automation = createAutomation({
-      store, ai: assistantAi, guser, google, builtins, reports, onChange: broadcast, upcoming: (h) => scheduler.upcoming(h),
+      store, ai: assistantAi, guser, google, builtins, reports, distribution, onChange: broadcast, upcoming: (h) => scheduler.upcoming(h),
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined)
     });
     registerIpc();

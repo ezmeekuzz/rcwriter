@@ -440,6 +440,7 @@ async function loadReader() {
       <div class="btn-row">
         <button class="btn primary" data-action="publish-article" data-id="${a.id}">Publish</button>
         ${a.published && a.published.status !== 'sent' && (S.sites.find((x) => x.id === a.published.siteId) || {}).type === 'wordpress' ? `<button class="btn" data-action="link-older" data-id="${a.id}">Link from older posts</button>` : ''}
+        ${a.published && a.published.status === 'publish' ? `<button class="btn" data-action="share-article" data-id="${a.id}">Share on social</button>` : ''}
         <button class="btn" data-action="copy-article" data-id="${a.id}">Copy text</button>
         <button class="btn" data-action="open-article-file" data-id="${a.id}">Open file</button>
         <button class="btn ghost" data-action="reveal-article" data-id="${a.id}">Show in folder</button>
@@ -459,7 +460,8 @@ async function loadReader() {
     const kw = a.keyword ? `<p class="muted small">Target keyword: <strong>${esc(a.keyword.keyword)}</strong>${a.keyword.volume ? `, ${esc(a.keyword.volume)} searches a month` : ''}${a.keyword.difficulty !== null && a.keyword.difficulty !== undefined ? `, difficulty ${esc(a.keyword.difficulty)}` : ''}. ${esc(a.keyword.why || '')}</p>` : '';
     const img = a.image ? `<figure class="feature"><img src="${esc(fileUrl(a.image.path))}" alt="${esc(a.image.alt)}"><figcaption>Alt text: ${esc(a.image.alt)}${a.image.credit ? ` · ${esc(a.image.credit)}` : ''}</figcaption></figure>` : a.imageError ? `<p class="warn">No featured image: ${esc(a.imageError)}</p>` : '';
     const linked = a.linkedFrom ? `<p class="muted small">Links from older posts: ${a.linkedFrom.applied ? `${a.linkedFrom.applied} added` : ''}${a.linkedFrom.queued ? `${a.linkedFrom.queued} waiting for approval` : ''}${!a.linkedFrom.applied && !a.linkedFrom.queued ? 'none found' : ''}.</p>` : '';
-    wrap.innerHTML = `${bar}<article class="reader">${pub}${qual}${kw}${linked}${img}${a.truncated ? '<p class="warn">This article reached the writer\'s max output length and may end abruptly. Raise "Max output tokens" on the writer.</p>' : ''}${renderMarkdown(text)}</article>`;
+    const soc = a.social && a.social.posts ? `<details class="detail"><summary>Social posts (${a.social.applied ? `${a.social.applied} sent` : ''}${a.social.applied && a.social.queued ? ', ' : ''}${a.social.queued ? `${a.social.queued} waiting for approval` : ''})</summary>${Object.entries(a.social.posts).map(([k, v]) => `<p class="small"><strong>${esc(k)}:</strong> ${esc(v)}</p>`).join('')}</details>` : '';
+    wrap.innerHTML = `${bar}<article class="reader">${pub}${qual}${kw}${linked}${soc}${img}${a.truncated ? '<p class="warn">This article reached the writer\'s max output length and may end abruptly. Raise "Max output tokens" on the writer.</p>' : ''}${renderMarkdown(text)}</article>`;
     wrap.querySelectorAll('a[data-external]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); api.openLink(el.href); }));
   } catch (e) {
     wrap.innerHTML = `${bar}<div class="reader"><p class="warn">${esc(cleanErr(e))}</p></div>`;
@@ -746,6 +748,7 @@ function writerModalHtml(d) {
             <span class="hint">When an article goes live, the AI finds up to 3 related older posts and links a natural phrase in each to the new one. Every change is logged and can be undone.</span></div>` : ''}
           <div id="w-ctx">${ctxHtml}</div>` : `<p class="muted small">Articles are saved to your computer. To publish them automatically, <a href="#" data-action="goto-sites">connect a website</a> first.</p>`}
         </fieldset>
+        ${window.socialBox ? window.socialBox(d) : ''}
       </div>
       <footer>
         <button class="btn ghost" data-action="close-modal">Cancel</button>
@@ -758,13 +761,19 @@ function readWriterForm() {
   const d = modal.draft;
   const root = modalRoot;
   root.querySelectorAll('[name]').forEach((el) => {
-    if (['researchConn', 'schemaType'].includes(el.name) || el.name.startsWith('biz.')) return;
+    if (['researchConn', 'schemaType'].includes(el.name) || el.name.startsWith('biz.') || el.name.startsWith('soc.')) return;
     d[el.name] = el.type === 'checkbox' ? el.checked : el.value;
   });
   if (root.querySelector('[name=researchConn]') || d.topicMode === 'research') d.researchConnectorIds = [...root.querySelectorAll('[name=researchConn]:checked')].map((el) => el.value);
   if (root.querySelector('[name=schemaType]')) d.schemaTypes = [...root.querySelectorAll('[name=schemaType]:checked')].map((el) => el.value);
   if (root.querySelector('[name^="biz."]')) { d.business = { ...(d.business || {}) }; root.querySelectorAll('[name^="biz."]').forEach((el) => { d.business[el.name.slice(4)] = el.value.trim(); }); }
   d.qualityMinScore = Math.max(1, Math.min(10, Number(d.qualityMinScore) || 7));
+  if (root.querySelector('[name="soc.enabled"]')) {
+    const q = (n) => root.querySelector(`[name="${n}"]`);
+    d.social = { enabled: q('soc.enabled').checked, mode: q('soc.mode') ? q('soc.mode').value : 'approve',
+      bufferProfileIds: [...root.querySelectorAll('[name="soc.buffer"]:checked')].map((el) => el.value),
+      webhook: q('soc.webhook') ? q('soc.webhook').checked : false, webhookPlatforms: [...root.querySelectorAll('[name="soc.plat"]:checked')].map((el) => el.value) };
+  }
   if (!d.siteId) d.publishStatus = 'none'; else if (d.publishStatus === 'none') d.publishStatus = 'draft';
   d.targetWords = Number(d.targetWords) || 1200;
   d.maxTokens = Number(d.maxTokens) || 8000;

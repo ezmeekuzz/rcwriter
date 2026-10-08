@@ -53,6 +53,14 @@ Each writer can now do more around every article, under **Before publishing** an
 - **Google Business Profile:** link a location to a website to draft replies to new reviews (good reviews can be answered automatically, the rest wait for approval) and to draft a Google post whenever a new article goes live. Google gives these APIs no quota until it approves your project's access request.
 - **Assistant AI** (Settings): the model that writes reports, emails, review replies and posts.
 
+## Social and newsletter (1.8)
+
+- **Social posts for every new article:** turn on "Share on social" for a writer. When an article goes live, the AI writes a native post for each network (LinkedIn, Facebook, X, Instagram, Threads, Pinterest, Google Business) linking to it, with the featured image, and either queues them for your approval or sends them.
+  - **Buffer:** paste an access token in Settings and pick the channels per writer. Posts go into your Buffer queue; **Undo** removes them if they haven't gone out.
+  - **Webhook:** any Zapier, Make or n8n webhook receives all the posts as JSON (one field per network, plus the link, image and alt text), optionally signed.
+  - Published articles also have a **Share on social** button.
+- **Monthly newsletter:** for each client, on a day you choose, the AI turns last month's published articles into a newsletter (subject, preview text, intro, a teaser and image per article). With a Mailchimp API key and an audience chosen, it's created as a **draft campaign in Mailchimp** for you to review and send; otherwise it's saved as an HTML file. You can also make one from Client reports.
+
 **Writers use site data:** with a WordPress site selected, a writer reads the site's published posts so it doesn't repeat them and links to related ones. With Search Console linked, it aims articles at searches the site already appears for but isn't in the top 3 for yet.
 
 ## Site audits
@@ -176,6 +184,7 @@ src/monitor.js     Uptime, SSL and traffic-drop monitoring
 src/reports.js     Word and PDF reports
 src/automation.js  Tasks, daily digest, Gmail and Business Profile automations
 src/googleuser.js  Your Google account: Gmail and Business Profile
+src/distribution.js  Social posts (Buffer, webhook) and Mailchimp newsletters
 src/lock.js        App password
 src/codex-install.js  One-click Codex download
 build/installer.nsh   Installer password page
@@ -186,4 +195,3 @@ src/renderer/      The interface (HTML, CSS, JS)
 
 ## Ideas for next steps
 
-- Social posts through Buffer and webhooks, and a monthly newsletter draft.

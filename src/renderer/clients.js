@@ -123,6 +123,7 @@ function openClientModal(c) {
             <div class="field"><label for="cl-wu-time">At</label><input type="time" id="cl-wu-time" value="${esc((d.weeklyUpdate && d.weeklyUpdate.time) || '16:00')}"></div></div>
           <label class="check"><input type="checkbox" id="cl-et" ${d.emailTasks !== false ? 'checked' : ''}><span><strong>Turn this client's emails into tasks</strong> (from the email addresses above)</span></label>
           ${S.googleUser && S.googleUser.gmail ? '' : '<p class="hint">Emails need Gmail connected in Settings.</p>'}
+          ${window.newsletterBox ? window.newsletterBox(d) : ''}
         </fieldset>
       </div>
       <footer><span></span><div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="client-save">${c ? 'Save' : 'Add client'}</button></div></footer>
@@ -205,7 +206,8 @@ Object.assign(ACTIONS, {
       const q = (id) => modalRoot.querySelector(id);
       await api.saveClient({ id: modal.id, name: v('#cl-name'), contact: v('#cl-contact'), email: v('#cl-email'), notes: v('#cl-notes'), siteIds,
         monthlyReport: { enabled: q('#cl-mr').checked, day: Number(v('#cl-mr-day')) || 1, time: v('#cl-mr-time') || '09:00' },
-        weeklyUpdate: { enabled: q('#cl-wu').checked, day: Number(v('#cl-wu-day')), time: v('#cl-wu-time') || '16:00' }, emailTasks: q('#cl-et').checked });
+        weeklyUpdate: { enabled: q('#cl-wu').checked, day: Number(v('#cl-wu-day')), time: v('#cl-wu-time') || '16:00' }, emailTasks: q('#cl-et').checked,
+        newsletter: window.readNewsletterBox ? window.readNewsletterBox() : undefined });
       toast(modal.id ? 'Client saved' : 'Client added');
       closeModal();
     } catch (e) { toast(cleanErr(e), 'error'); }

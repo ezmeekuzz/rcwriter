@@ -48,6 +48,7 @@ function defaults() {
     reports: [],
     autoState: {},
     googleUser: {},
+    distribution: {},
     connectors: [],
     google: {},
     auditJobs: [],

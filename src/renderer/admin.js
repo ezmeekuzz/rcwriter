@@ -82,21 +82,23 @@ function openTaskModal(t) {
 function viewReports() {
   const list = S.reports.filter((r) => !r.clientId || inClientId(r.clientId)).map((r) => `
     <div class="row writer-row">
-      <div><div class="title">${esc(r.clientName)}: ${esc(r.period)} SEO report</div>
+      <div><div class="title">${esc(r.clientName)}: ${esc(r.period)} ${r.kind === 'newsletter' ? `newsletter, "${esc(r.subject || '')}"` : 'SEO report'}</div>
         <div class="meta">Created ${fmtRel(r.createdAt)}${r.summary ? ` · ${esc(String(r.summary).slice(0, 160))}${r.summary.length > 160 ? '…' : ''}` : ''}</div></div>
       <div class="btn-row">
         ${r.files.pdf ? `<button class="btn" data-action="report-open" data-id="${r.id}" data-fmt="pdf">Open PDF</button>` : ''}
         ${r.files.docx ? `<button class="btn" data-action="report-open" data-id="${r.id}" data-fmt="docx">Open Word</button>` : ''}
+        ${r.files.html ? `<button class="btn" data-action="report-open" data-id="${r.id}" data-fmt="html">Open</button>` : ''}
+        ${r.mailchimp && r.mailchimp.url ? `<button class="btn" data-action="link" data-url="${esc(r.mailchimp.url)}">Edit in Mailchimp</button>` : ''}
         <button class="btn ghost" data-action="report-reveal" data-id="${r.id}">Show in folder</button>
       </div>
     </div>`).join('');
   const clients = S.clients.filter((c) => inClientId(c.id));
   return `
-    <div class="page-head"><div><h1>Client reports</h1><p class="sub">Monthly SEO reports in Word and PDF: an executive summary, key results against the month before, achievements, work completed and next month's plan. Turn on automatic monthly reports for each client in Clients.</p></div></div>
+    <div class="page-head"><div><h1>Client reports</h1><p class="sub">Monthly SEO reports in Word and PDF (an executive summary, key results against the month before, achievements, work completed and next month's plan) and monthly newsletters. Turn on automatic reports and newsletters for each client in Clients.</p></div></div>
     ${clientBanner()}
     ${clients.length ? `<section class="panel" style="max-width:none"><h3>Create a report now</h3>
       <div class="report-make">${clients.map((c) => `<div><strong>${esc(c.name)}</strong>${c.monthlyReport && c.monthlyReport.enabled ? ` <span class="muted small">automatic on day ${esc(c.monthlyReport.day || 1)}</span>` : ''}
-        <span class="btn-row"><button class="btn" data-action="report-make" data-id="${c.id}" data-offset="-1">Last month</button><button class="btn ghost" data-action="report-make" data-id="${c.id}" data-offset="0">This month so far</button></span></div>`).join('')}</div>
+        <span class="btn-row"><button class="btn" data-action="report-make" data-id="${c.id}" data-offset="-1">Last month</button><button class="btn ghost" data-action="report-make" data-id="${c.id}" data-offset="0">This month so far</button><button class="btn ghost" data-action="newsletter-make" data-id="${c.id}">Newsletter</button></span></div>`).join('')}</div>
       <p class="muted small">Uses Search Console and GA4 linked to each client's websites, plus the articles, fixes, audits and tasks RCWriter recorded. The written parts use your Assistant AI (Settings).</p></section>`
       : '<div class="list"><div class="empty"><p>Add a client first. Reports are made per client.</p><button class="btn primary" data-action="nav" data-view="clients">Go to Clients</button></div></div>'}
     <h2>Saved reports</h2>

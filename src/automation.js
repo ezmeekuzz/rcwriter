@@ -21,7 +21,7 @@ function dueAt(timeStr, base = new Date()) {
   return t;
 }
 
-function createAutomation({ store, ai, guser, google, builtins, reports, notify, onChange, upcoming }) {
+function createAutomation({ store, ai, guser, google, builtins, reports, notify, onChange, upcoming, distribution = null }) {
   const d = () => store.data;
   const st = () => d().autoState || (d().autoState = {});
   const busy = new Set();
@@ -356,6 +356,15 @@ function createAutomation({ store, ai, guser, google, builtins, reports, notify,
       if (wu.enabled && now.getDay() === Number(wu.day ?? 5) && st()[`weekly:${c.id}`] !== today() && now >= dueAt(wu.time || '16:00') && guser.has('gmail')) {
         st()[`weekly:${c.id}`] = today();
         once(`Weekly update:${c.id}`, () => weeklyUpdate(c));
+      }
+      const nl = c.newsletter || {};
+      const nkey = `newsletter:${c.id}`;
+      if (distribution && nl.enabled && now.getDate() >= Number(nl.day || 2) && st()[nkey] !== reports.monthPeriod(-1).key && now >= dueAt(nl.time || '10:00')) {
+        st()[nkey] = reports.monthPeriod(-1).key;
+        once(`Newsletter:${c.id}`, async () => {
+          const rec = await distribution.monthlyNewsletter(c);
+          notify(`Newsletter draft ready: ${c.name}`, rec.mailchimp ? 'Review and send it in Mailchimp.' : 'Saved as an HTML file in your Reports folder.', { view: 'reports' });
+        });
       }
       const mr = c.monthlyReport || {};
       const key = `monthly:${c.id}`;
