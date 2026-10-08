@@ -4,6 +4,7 @@
 //  google:<siteId>   Google data      - Search Console, GA4, Tag Manager for the site
 const sitesLib = require('./sites');
 const guard = require('./hostguard');
+const { insertLink } = require('./enhance');
 
 // All requests to websites go through the host guard: one at a time per site,
 // paced, cached for 30 minutes, with a daily limit and an automatic pause if
@@ -265,6 +266,16 @@ function createBuiltins({ store, google }) {
           const r = await wp(s, `/wp/v2/${t}/${Number(id)}`, { method: 'POST', body: { content } });
           return { text: `Updated content of ${t} ${id}: ${r.link}`, before: cur.content.raw };
         }, { undo: async ({ type, id }, before) => { const t = type === 'pages' ? 'pages' : 'posts'; await wp(s, `/wp/v2/${t}/${Number(id)}`, { method: 'POST', body: { content: before } }); return `Restored content of ${t} ${id}.`; } }),
+      T('wp_add_internal_link', 'Add one internal link to a post or page: the first plain-text occurrence of a phrase (outside headings and existing links) becomes a link to the given URL. Nothing else in the content changes. Use wp_get_content first to pick a phrase that really appears in it.',
+        { type: typeProp, id: { type: 'number' }, anchorText: { type: 'string', description: 'Exact phrase already in the text, 2 to 7 words' }, url: { type: 'string', description: 'Full URL to link to' } }, ['type', 'id', 'anchorText', 'url'], 'safe', async ({ type, id, anchorText, url }) => {
+          const t = type === 'pages' ? 'pages' : 'posts';
+          if (!/^https?:\/\//.test(String(url))) throw new Error('Give a full URL starting with https://');
+          const cur = await get(t, id);
+          const r = insertLink(cur.content.raw, anchorText, url);
+          if (!r.ok) throw new Error(`Link not added: ${r.reason}.`);
+          const saved = await wp(s, `/wp/v2/${t}/${Number(id)}`, { method: 'POST', body: { content: r.html } });
+          return { text: `Linked "${r.anchor}" to ${url} in ${saved.link}`, before: cur.content.raw };
+        }, { undo: async ({ type, id }, before) => { const t = type === 'pages' ? 'pages' : 'posts'; await wp(s, `/wp/v2/${t}/${Number(id)}`, { method: 'POST', body: { content: before } }); return `Removed the added link from ${t} ${id}.`; } }),
       T('wp_set_image_alt', 'Set the alt text of an image in the media library.', { id: { type: 'number' }, alt: { type: 'string' } }, ['id', 'alt'], 'safe', async ({ id, alt }) => {
         const cur = await wp(s, `/wp/v2/media/${Number(id)}`, { query: { context: 'edit' } });
         await wp(s, `/wp/v2/media/${Number(id)}`, { method: 'POST', body: { alt_text: alt } });
@@ -298,6 +309,9 @@ function createBuiltins({ store, google }) {
           { ...dates, dimensions: { type: 'array', items: { type: 'string', enum: ['query', 'page', 'device', 'country', 'date'] } }, rowLimit: { type: 'number' }, pageContains: { type: 'string' }, queryContains: { type: 'string' } },
           [], 'read', async (a) => json(await google.gscPerformance(g.gscSite, a))),
         T('gsc_inspect_url', 'Google Search Console URL Inspection: whether a URL is indexed, why not, Google-selected canonical and last crawl.', { url: { type: 'string' } }, ['url'], 'read', async ({ url }) => json(await google.gscInspect(g.gscSite, url))),
+        T('gsc_compare_periods', 'Compare Search Console clicks, impressions and position per page or per query between the last N days and the N days before that. Returns the biggest losers and gainers. Use it to find decaying posts, lost rankings and traffic drops.',
+          { dimension: { type: 'string', enum: ['page', 'query'] }, days: { type: 'number', description: 'Length of each period, default 28' }, minClicks: { type: 'number', description: 'Ignore rows with fewer clicks in the earlier period, default 10' }, limit: { type: 'number', description: 'Rows per list, default 20' } },
+          [], 'read', async (a) => json(await google.gscCompare(g.gscSite, a))),
         T('gsc_sitemaps', 'Sitemaps submitted in Google Search Console with submitted and indexed counts, errors and warnings.', {}, [], 'read', async () => json(await google.gscSitemaps(g.gscSite)))
       );
     }

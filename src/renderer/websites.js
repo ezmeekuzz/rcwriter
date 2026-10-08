@@ -26,7 +26,7 @@ function googlePanel() {
 }
 
 function viewSitesShared() {
-  const rows = S.sites.map((site) => {
+  const rows = S.sites.filter((site) => inClient(site.id)).map((site) => {
     const writers = S.writers.filter((w) => w.siteId === site.id).map((w) => w.name);
     const audits = S.auditJobs.filter((j) => j.siteId === site.id).map((j) => j.name);
     const g = site.google || {};
@@ -42,6 +42,8 @@ function viewSitesShared() {
           <div class="meta">${esc(site.url)} · ${state}</div>
           <div class="meta">Google: ${gBits.length ? esc(gBits.join(', ')) : S.google.connected ? 'not linked yet' : 'connect Google above to link data'}</div>
           <div class="meta">Audit tools: ${builtins.length ? esc(builtins.join(', ')) : 'none'}</div>
+          ${site.type !== 'webhook' ? `<div class="meta">${healthDot(site.monitor && site.monitor.enabled ? site.health : null)}${esc(healthText(site))}</div>` : ''}
+          ${S.clients.length ? `<div class="meta inline-pace">Client <select data-change="site-client" data-id="${site.id}" aria-label="Client for ${esc(site.name)}"><option value="">None</option>${S.clients.map((c) => `<option value="${c.id}" ${site.clientId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>` : ''}
           <div class="meta">${writers.length ? `Writers: ${esc(writers.join(', '))}` : 'No writers publish here'}${audits.length ? ` · Audits: ${esc(audits.join(', '))}` : ''}</div>
           ${site.type !== 'webhook' ? `<div class="meta inline-pace">Request pace
             <select data-change="site-pace" data-id="${site.id}" aria-label="Request pace for ${esc(site.name)}">${Object.entries(S.paces).map(([k, p]) => `<option value="${k}" ${site.pace === k ? 'selected' : ''}>${esc(p.label)}: 1 request every ${p.gapMs / 1000}s, up to ${p.auditPerDay} audit requests a day</option>`).join('')}</select></div>` : ''}
@@ -50,6 +52,7 @@ function viewSitesShared() {
         </div>
         <div class="btn-row">
           ${S.google.connected ? `<button class="btn" data-action="site-google" data-id="${site.id}">Google data</button>` : ''}
+          ${site.type !== 'webhook' ? `<button class="btn ghost" data-action="monitor-edit" data-id="${site.id}">Monitoring</button>` : ''}
           <button class="btn ghost" data-action="test-site" data-id="${site.id}">Test</button>
           ${site.type === 'wordpress' ? `<button class="btn ghost" data-action="reconnect-site" data-id="${site.id}">Reconnect</button>` : site.type === 'webhook' ? `<button class="btn ghost" data-action="edit-webhook" data-id="${site.id}">Edit</button>` : `<button class="btn ghost" data-action="url-site-edit" data-id="${site.id}">Edit</button>`}
           <button class="btn ghost danger" data-action="delete-site" data-id="${site.id}">Remove</button>
@@ -65,6 +68,7 @@ function viewSitesShared() {
         <button class="btn primary" data-action="new-wordpress">Connect a WordPress site</button>
       </div>
     </div>
+    ${clientBanner()}
     ${googlePanel()}
     <div class="list">${rows || '<div class="empty"><p>No websites yet.</p><button class="btn primary" data-action="new-wordpress">Connect a WordPress site</button></div>'}</div>
     <p class="muted small" style="max-width:72ch;margin-top:16px">Using Ghost, Webflow, Wix, Shopify or another platform? Add a webhook to publish through Zapier, Make or n8n, and add the site as a website to audit it.</p>`;

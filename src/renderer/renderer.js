@@ -70,6 +70,7 @@ function describeSchedule(s) {
   if (s.type === 'interval') return `Every ${s.intervalHours} hour${Number(s.intervalHours) === 1 ? '' : 's'}`;
   return '';
 }
+function fileUrl(p) { return `file:///${String(p).replace(/\\/g, '/').replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/').replace(/^([A-Za-z])%3A/, '$1:')}`; }
 function writerName(id) { return S.writers.find((w) => w.id === id)?.name || 'Missing writer'; }
 function toLocalInput(d) {
   const p = (n) => String(n).padStart(2, '0');
@@ -122,6 +123,7 @@ function renderSidebar() {
       b.innerHTML = `Audits${S.auditRunning.length ? '<span class="badge">running</span>' : n ? `<span class="badge">${n} to approve</span>` : ''}`;
     }
   });
+  if (window.renderClientPick) window.renderClientPick();
   const active = S.schedules.filter((s) => s.enabled && s.kind !== 'audit').length + S.auditJobs.filter((j) => j.enabled !== false && S.schedules.some((s) => s.id === `audit-${j.id}`)).length;
   const paused = S.settings.paused;
   document.getElementById('status').innerHTML = `
@@ -297,7 +299,7 @@ function viewToday() {
   }).join('');
 
   const writing = S.jobs.map((j) => `
-    <div class="writing-now"><div class="spinner"></div><div><strong>${esc(j.writerName)}</strong> is writing${j.scheduleName ? ` for "${esc(j.scheduleName)}"` : ''}. Started ${fmtRel(j.startedAt)}.</div></div>`).join('')
+    <div class="writing-now"><div class="spinner"></div><div><strong>${esc(j.writerName)}</strong> is ${j.step && j.step !== 'Writing' ? esc(j.step.toLowerCase()) : 'writing'}${j.scheduleName ? ` for "${esc(j.scheduleName)}"` : ''}. Started ${fmtRel(j.startedAt)}.</div></div>`).join('')
     + S.auditRunning.map((r) => `
     <div class="writing-now"><div class="spinner"></div><div><strong>${esc(r.jobName)}</strong> is auditing ${esc(r.siteUrl || 'your site')}. ${r.applied} changes made, ${r.queued} waiting for approval.</div></div>`).join('');
   const pendingCount = S.approvals.filter((a) => a.status === 'pending').length;
@@ -342,8 +344,10 @@ function viewToday() {
 }
 
 // ---------- Writers ----------
+function writerSite(writerId) { const w = S.writers.find((x) => x.id === writerId); return w ? w.siteId : ''; }
+
 function viewWriters() {
-  const rows = S.writers.map((w) => {
+  const rows = S.writers.filter((w) => inClient(w.siteId)).map((w) => {
     const count = S.articles.filter((a) => a.writerId === w.id).length;
     const topics = String(w.topics || '').split('\n').filter((t) => t.trim()).length;
     return `
@@ -364,12 +368,13 @@ function viewWriters() {
       <div><h1>Writers</h1><p class="sub">A writer is a set of instructions: who the AI is, what it knows, how it sounds, and what it writes about. Make one per topic or publication.</p></div>
       <button class="btn primary" data-action="new-writer">New writer</button>
     </div>
+    ${clientBanner()}
     <div class="list">${rows || '<div class="empty"><p>No writers yet.</p><button class="btn primary" data-action="new-writer">Create your first writer</button></div>'}</div>`;
 }
 
 // ---------- Schedules ----------
 function viewSchedules() {
-  const rows = S.schedules.filter((s) => s.kind !== 'audit').map((s) => `
+  const rows = S.schedules.filter((s) => s.kind !== 'audit' && inClient(writerSite(s.writerId))).map((s) => `
     <div class="row schedule-row">
       <label class="switch" title="${s.enabled ? 'Turn off' : 'Turn on'}"><input type="checkbox" data-change="toggle-schedule" data-id="${s.id}" ${s.enabled ? 'checked' : ''} aria-label="Schedule ${esc(s.name)} on"><span></span></label>
       <div>
@@ -388,24 +393,26 @@ function viewSchedules() {
       <div><h1>Schedules</h1><p class="sub">Schedules tell a writer when to write. Each one can remind you before it runs; the default is 20 minutes, and you can add as many reminders as you like.</p></div>
       <button class="btn primary" data-action="new-schedule">New schedule</button>
     </div>
+    ${clientBanner()}
     <div class="list">${rows || `<div class="empty"><p>No schedules yet.</p>${S.writers.length ? '<button class="btn primary" data-action="new-schedule">Create a schedule</button>' : '<button class="btn primary" data-action="new-writer">Create a writer first</button>'}</div>`}</div>`;
 }
 
 // ---------- Articles ----------
 function viewArticles() {
   const q = articleQuery.toLowerCase();
-  const items = S.articles.filter((a) => !q || a.title.toLowerCase().includes(q) || (a.writerName || '').toLowerCase().includes(q));
+  const items = S.articles.filter((a) => (!q || a.title.toLowerCase().includes(q) || (a.writerName || '').toLowerCase().includes(q)) && inClient(a.published ? a.published.siteId : writerSite(a.writerId)));
   if (!selectedArticleId && items[0]) selectedArticleId = items[0].id;
   const list = items.map((a) => `
     <button class="article-item ${a.id === selectedArticleId ? 'active' : ''}" data-action="select-article" data-id="${a.id}">
       <div class="t">${esc(a.title)}</div>
-      <div class="m">${esc(a.writerName)}, ${fmtDateTime(a.createdAt)}, ${a.words} words${a.published ? `. On ${esc(a.published.siteName)}` : a.publishError ? '. Not published' : ''}</div>
+      <div class="m">${esc(a.writerName)}, ${fmtDateTime(a.createdAt)}, ${a.words} words${a.quality && a.quality.score ? `, quality ${a.quality.score}/10` : ''}${a.published ? `. On ${esc(a.published.siteName)}` : a.publishError ? '. Not published' : ''}</div>
     </button>`).join('');
   return `
     <div class="page-head">
       <div><h1>Articles</h1><p class="sub">Every article is saved as a Markdown file in your output folder.</p></div>
       <button class="btn" data-action="open-dir">Open folder</button>
     </div>
+    ${clientBanner()}
     ${S.articles.length ? `
     <div class="articles">
       <div class="article-list">
@@ -426,6 +433,7 @@ async function loadReader() {
       <div class="muted small" style="align-self:center">${esc(PROVIDER_SHORT[a.provider] || a.provider)}: ${esc(a.model || 'plan default')}${a.scheduleName ? `, from "${esc(a.scheduleName)}"` : ''}</div>
       <div class="btn-row">
         <button class="btn primary" data-action="publish-article" data-id="${a.id}">Publish</button>
+        ${a.published && a.published.status !== 'sent' && (S.sites.find((x) => x.id === a.published.siteId) || {}).type === 'wordpress' ? `<button class="btn" data-action="link-older" data-id="${a.id}">Link from older posts</button>` : ''}
         <button class="btn" data-action="copy-article" data-id="${a.id}">Copy text</button>
         <button class="btn" data-action="open-article-file" data-id="${a.id}">Open file</button>
         <button class="btn ghost" data-action="reveal-article" data-id="${a.id}">Show in folder</button>
@@ -438,7 +446,14 @@ async function loadReader() {
     const pub = a.published
       ? `<p class="published">${a.published.status === 'publish' ? 'Published' : a.published.status === 'sent' ? 'Sent' : `Saved as ${esc(a.published.status)}`} on ${esc(a.published.siteName)} ${fmtRel(a.published.at)}.${a.published.url ? ` <a href="#" data-action="link" data-url="${esc(a.published.url)}">View</a>` : ''}${a.published.editUrl ? ` <a href="#" data-action="link" data-url="${esc(a.published.editUrl)}">Edit in WordPress</a>` : ''}</p>`
       : a.publishError ? `<p class="warn">Not published: ${esc(a.publishError)}</p>` : '';
-    wrap.innerHTML = `${bar}<article class="reader">${pub}${a.truncated ? '<p class="warn">This article reached the writer\'s max output length and may end abruptly. Raise "Max output tokens" on the writer.</p>' : ''}${renderMarkdown(text)}</article>`;
+    const q = a.quality;
+    const qual = q ? (q.error ? `<p class="warn">Quality check didn't run: ${esc(q.error)}</p>` : `
+      <details class="quality ${q.passed ? 'ok' : 'low'}"><summary><strong>Quality ${q.score}/10</strong>${q.revised ? ` after one revision (first draft ${q.firstScore}/10)` : ''}${q.passed ? '' : `, below your minimum of ${q.min}${a.heldForQuality ? ', so it was saved as a draft' : ''}`}${q.issues && q.issues.length ? `. ${q.issues.length} note${q.issues.length > 1 ? 's' : ''}` : ''}</summary>
+        ${q.issues && q.issues.length ? `<ul>${q.issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : '<p class="small">No problems found.</p>'}</details>`) : '';
+    const kw = a.keyword ? `<p class="muted small">Target keyword: <strong>${esc(a.keyword.keyword)}</strong>${a.keyword.volume ? `, ${esc(a.keyword.volume)} searches a month` : ''}${a.keyword.difficulty !== null && a.keyword.difficulty !== undefined ? `, difficulty ${esc(a.keyword.difficulty)}` : ''}. ${esc(a.keyword.why || '')}</p>` : '';
+    const img = a.image ? `<figure class="feature"><img src="${esc(fileUrl(a.image.path))}" alt="${esc(a.image.alt)}"><figcaption>Alt text: ${esc(a.image.alt)}${a.image.credit ? ` · ${esc(a.image.credit)}` : ''}</figcaption></figure>` : a.imageError ? `<p class="warn">No featured image: ${esc(a.imageError)}</p>` : '';
+    const linked = a.linkedFrom ? `<p class="muted small">Links from older posts: ${a.linkedFrom.applied ? `${a.linkedFrom.applied} added` : ''}${a.linkedFrom.queued ? `${a.linkedFrom.queued} waiting for approval` : ''}${!a.linkedFrom.applied && !a.linkedFrom.queued ? 'none found' : ''}.</p>` : '';
+    wrap.innerHTML = `${bar}<article class="reader">${pub}${qual}${kw}${linked}${img}${a.truncated ? '<p class="warn">This article reached the writer\'s max output length and may end abruptly. Raise "Max output tokens" on the writer.</p>' : ''}${renderMarkdown(text)}</article>`;
     wrap.querySelectorAll('a[data-external]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); api.openLink(el.href); }));
   } catch (e) {
     wrap.innerHTML = `${bar}<div class="reader"><p class="warn">${esc(cleanErr(e))}</p></div>`;
@@ -551,6 +566,12 @@ function viewSettings() {
       <button class="btn" data-action="test-notify">Send a test notification</button>
     </section>
     <section class="panel">
+      <h3>Images</h3>
+      <p class="muted small">Writers can add a featured image to each article. Pexels photos are free; get a key at <a href="#" data-action="link" data-url="https://www.pexels.com/api/new/">pexels.com/api</a>. Generated images use your OpenAI API key and are billed by OpenAI.</p>
+      <div class="field"><label for="pexels-key">Pexels API key</label><div class="inline"><input type="password" id="pexels-key" placeholder="${S.images.hasPexelsKey ? 'Saved. Paste a new key to replace it.' : 'Paste your Pexels key'}" autocomplete="off"><button class="btn" data-action="pexels-save">Save</button>${S.images.hasPexelsKey ? '<button class="btn ghost" data-action="pexels-clear">Remove</button>' : ''}</div></div>
+      <div class="field" style="max-width:320px"><label for="img-model">OpenAI image model</label><input type="text" id="img-model" value="${esc(S.images.model)}" data-input-images="model"><span class="hint">gpt-image-1 by default. Saved when you leave the field.</span></div>
+    </section>
+    <section class="panel">
       <h3>Saving articles</h3>
       <div class="field"><label>Output folder</label><div class="inline"><input type="text" value="${esc(s.outputDir)}" readonly><button class="btn" data-action="pick-dir">Change</button><button class="btn ghost" data-action="open-dir">Open</button></div>
       <span class="hint">Each writer gets its own subfolder.</span></div>
@@ -585,7 +606,8 @@ function blankWriter() {
     name: '', persona: '', attitude: '', knowledge: '', knowledgeFiles: [], instructions: '',
     topics: '', topicMode: 'rotate', language: 'English', targetWords: 1200,
     provider: firstProvider, model: '', temperature: '', maxTokens: 8000, avoidRepeats: true, includeMeta: false,
-    siteId: '', publishStatus: 'draft', wpCategories: '', wpTags: ''
+    siteId: '', publishStatus: 'draft', wpCategories: '', wpTags: '',
+    qualityCheck: true, qualityMinScore: 7, qualityRevise: true, imageSource: 'none', schemaTypes: [], business: {}, linkOlderPosts: 'off', researchConnectorIds: []
   };
 }
 
@@ -593,6 +615,28 @@ function openWriterModal(w) {
   modal = { type: 'writer', draft: JSON.parse(JSON.stringify(w || blankWriter())) };
   renderModal();
   loadModelsForModal(false);
+}
+
+function researchBox(d) {
+  const conns = S.connectors;
+  return `<div class="subpanel">
+    <p class="small" style="margin-top:0">Before each article, the AI researches keywords around your topics, skips anything your site already covers, and picks one with real searches and low difficulty.</p>
+    <span class="label">Use these connections</span>
+    <div class="checks">${conns.map((c) => `<label class="check"><input type="checkbox" name="researchConn" value="${c.id}" ${(d.researchConnectorIds || []).includes(c.id) ? 'checked' : ''}><span>${esc(c.name)}</span></label>`).join('') || '<span class="muted small">None yet. Add Ahrefs or Semrush under Site audits, Connections.</span>'}</div>
+    <div class="grid-2"><div class="field"><label for="w-country">Market (optional)</label><input type="text" id="w-country" name="researchCountry" value="${esc(d.researchCountry || '')}" placeholder="United Kingdom"></div>
+    <div class="field"><label for="w-rcalls">Max research tool calls</label><input type="number" id="w-rcalls" name="researchMaxCalls" min="5" max="40" value="${esc(d.researchMaxCalls || 20)}"></div></div>
+    <span class="hint">Search Console data for the chosen website is used too. If research fails, the writer falls back to its topics.</span>
+  </div>`;
+}
+
+function businessBox(d) {
+  const b = d.business || {};
+  const f = (k, label, ph) => `<div class="field"><label for="biz-${k}">${label}</label><input type="text" id="biz-${k}" name="biz.${k}" value="${esc(b[k] || '')}" placeholder="${ph}"></div>`;
+  return `<div class="subpanel"><div class="grid-2">
+    ${f('name', 'Business name', 'Eco Pro Properties')}${f('type', 'Schema type', 'LocalBusiness, RealEstateAgent, Plumber…')}
+    ${f('address', 'Address', '12 High Street, Leeds LS1 4AB')}${f('phone', 'Phone', '+44 113 000 0000')}
+    ${f('url', 'Website', 'https://…')}${f('area', 'Area served', 'Leeds and West Yorkshire')}
+  </div></div>`;
 }
 
 function writerModalHtml(d) {
@@ -630,13 +674,15 @@ function writerModalHtml(d) {
           <div class="field"><label for="w-topics">Topics, one per line</label><textarea id="w-topics" name="topics" placeholder="Best waterfalls near Cagayan de Oro&#10;White water rafting for beginners&#10;Budget weekend itinerary">${esc(d.topics)}</textarea>
             <span class="hint">Leave empty to let the AI choose based on the instructions and knowledge. Titles it has already written are avoided.</span></div>
           <div class="grid-3">
-            <div class="field"><label for="w-mode">Topic order</label><select id="w-mode" name="topicMode">
+            <div class="field"><label for="w-mode">Topic order</label><select id="w-mode" name="topicMode" data-change="writer-rerender">
               <option value="rotate" ${d.topicMode === 'rotate' ? 'selected' : ''}>Go through in order</option>
               <option value="random" ${d.topicMode === 'random' ? 'selected' : ''}>Pick at random</option>
-              <option value="ai" ${d.topicMode === 'ai' ? 'selected' : ''}>Treat as themes; AI picks an angle</option></select></div>
+              <option value="ai" ${d.topicMode === 'ai' ? 'selected' : ''}>Treat as themes; AI picks an angle</option>
+              <option value="research" ${d.topicMode === 'research' ? 'selected' : ''}>Research a keyword first</option></select></div>
             <div class="field"><label for="w-lang">Language</label><input type="text" id="w-lang" name="language" value="${esc(d.language)}"></div>
             <div class="field"><label for="w-words">Target length (words)</label><input type="number" id="w-words" name="targetWords" min="100" step="100" value="${esc(d.targetWords)}"></div>
           </div>
+          ${d.topicMode === 'research' ? researchBox(d) : ''}
           <label class="check"><input type="checkbox" name="avoidRepeats" ${d.avoidRepeats !== false ? 'checked' : ''}><span>Avoid repeating titles this writer has already written</span></label>
           <label class="check"><input type="checkbox" name="includeMeta" ${d.includeMeta ? 'checked' : ''}><span>Add an SEO meta description at the end</span></label>
         </fieldset>
@@ -654,6 +700,28 @@ function writerModalHtml(d) {
           </div>
         </fieldset>
 
+        <fieldset><legend>Before publishing</legend>
+          <label class="check"><input type="checkbox" name="qualityCheck" data-change="writer-rerender" ${d.qualityCheck ? 'checked' : ''}><span><strong>Have an AI editor check each article</strong><br><span class="muted small">Checks facts against the knowledge, the instructions, voice and length, and scores it out of 10.</span></span></label>
+          ${d.qualityCheck ? `<div class="grid-2" style="margin-left:26px">
+            <div class="field"><label for="w-qmin">Minimum score to publish</label><input type="number" id="w-qmin" name="qualityMinScore" min="1" max="10" value="${esc(d.qualityMinScore || 7)}"><span class="hint">Below this, the article is saved as a draft instead of going live.</span></div>
+            <div class="field"><span class="label">&nbsp;</span><label class="check"><input type="checkbox" name="qualityRevise" ${d.qualityRevise !== false ? 'checked' : ''}><span>Rewrite once to fix what the editor found</span></label></div>
+          </div>` : ''}
+          <div class="grid-2">
+            <div class="field"><label for="w-img">Featured image</label><select id="w-img" name="imageSource">
+              <option value="none" ${!d.imageSource || d.imageSource === 'none' ? 'selected' : ''}>No image</option>
+              <option value="pexels" ${d.imageSource === 'pexels' ? 'selected' : ''}>Free stock photo from Pexels</option>
+              <option value="openai" ${d.imageSource === 'openai' ? 'selected' : ''}>Generate with OpenAI</option></select>
+              <span class="hint">The AI writes the alt text. ${!S.images.hasPexelsKey && d.imageSource === 'pexels' ? 'Add a free Pexels key in Settings first.' : !S.images.hasOpenAiKey && d.imageSource === 'openai' ? 'Needs an OpenAI API key under AI providers (billed per image).' : 'Pexels needs a free key in Settings; OpenAI uses your API key.'}</span></div>
+            <div class="field"><span class="label">Schema markup</span>
+              <div class="checks col">
+                <label class="check"><input type="checkbox" name="schemaType" value="article" ${(d.schemaTypes || []).includes('article') ? 'checked' : ''}><span>Article</span></label>
+                <label class="check"><input type="checkbox" name="schemaType" value="faq" ${(d.schemaTypes || []).includes('faq') ? 'checked' : ''}><span>FAQ (when the article has an FAQ section)</span></label>
+                <label class="check"><input type="checkbox" name="schemaType" value="localBusiness" data-change="writer-rerender" ${(d.schemaTypes || []).includes('localBusiness') ? 'checked' : ''}><span>Local business</span></label>
+              </div></div>
+          </div>
+          ${(d.schemaTypes || []).includes('localBusiness') ? businessBox(d) : ''}
+        </fieldset>
+
         <fieldset><legend>Where to publish</legend>
           ${S.sites.length ? `
           <div class="grid-2">
@@ -665,6 +733,11 @@ function writerModalHtml(d) {
             <div class="field"><label for="w-cats">Categories</label><input type="text" id="w-cats" name="wpCategories" value="${esc(d.wpCategories)}" placeholder="Travel, Guides"><span class="hint">Separate with commas. Missing ones are created.</span></div>
             <div class="field"><label for="w-tags">Tags</label><input type="text" id="w-tags" name="wpTags" value="${esc(d.wpTags)}" placeholder="mindanao, budget travel"></div>
           </div>
+          ${ctxSite && ctxSite.type === 'wordpress' ? `<div class="field"><label for="w-link">Links from older posts</label><select id="w-link" name="linkOlderPosts">
+            <option value="off" ${!d.linkOlderPosts || d.linkOlderPosts === 'off' ? 'selected' : ''}>Don't add any</option>
+            <option value="approve" ${d.linkOlderPosts === 'approve' ? 'selected' : ''}>Suggest links for me to approve</option>
+            <option value="auto" ${d.linkOlderPosts === 'auto' ? 'selected' : ''}>Add them automatically</option></select>
+            <span class="hint">When an article goes live, the AI finds up to 3 related older posts and links a natural phrase in each to the new one. Every change is logged and can be undone.</span></div>` : ''}
           <div id="w-ctx">${ctxHtml}</div>` : `<p class="muted small">Articles are saved to your computer. To publish them automatically, <a href="#" data-action="goto-sites">connect a website</a> first.</p>`}
         </fieldset>
       </div>
@@ -679,8 +752,13 @@ function readWriterForm() {
   const d = modal.draft;
   const root = modalRoot;
   root.querySelectorAll('[name]').forEach((el) => {
+    if (['researchConn', 'schemaType'].includes(el.name) || el.name.startsWith('biz.')) return;
     d[el.name] = el.type === 'checkbox' ? el.checked : el.value;
   });
+  if (root.querySelector('[name=researchConn]') || d.topicMode === 'research') d.researchConnectorIds = [...root.querySelectorAll('[name=researchConn]:checked')].map((el) => el.value);
+  if (root.querySelector('[name=schemaType]')) d.schemaTypes = [...root.querySelectorAll('[name=schemaType]:checked')].map((el) => el.value);
+  if (root.querySelector('[name^="biz."]')) { d.business = { ...(d.business || {}) }; root.querySelectorAll('[name^="biz."]').forEach((el) => { d.business[el.name.slice(4)] = el.value.trim(); }); }
+  d.qualityMinScore = Math.max(1, Math.min(10, Number(d.qualityMinScore) || 7));
   if (!d.siteId) d.publishStatus = 'none'; else if (d.publishStatus === 'none') d.publishStatus = 'draft';
   d.targetWords = Number(d.targetWords) || 1200;
   d.maxTokens = Number(d.maxTokens) || 8000;
@@ -829,6 +907,20 @@ function confirmModal({ title, body, confirm, danger, extra = '' }) {
         <footer><button class="btn ghost" data-action="confirm-no">Cancel</button><button class="btn ${danger ? 'primary' : 'primary'}" data-action="confirm-yes">${esc(confirm)}</button></footer>
       </div></div>`;
     modalRoot.querySelector('[data-action=confirm-yes]').focus();
+  });
+}
+
+function chooseLinkMode() {
+  return new Promise((resolve) => {
+    modal = { type: 'confirm', resolve };
+    modalRoot.innerHTML = `
+      <div class="backdrop"><div class="modal small" role="dialog" aria-modal="true" aria-labelledby="mt">
+        <header><h2 id="mt">Link from older posts</h2></header>
+        <div class="body"><p class="small">The AI picks up to 3 related posts on the same site and links a natural phrase in each to this article.</p>
+          <label class="check"><input type="radio" name="lm" value="approve" checked><span>Let me approve each link first</span></label>
+          <label class="check"><input type="radio" name="lm" value="auto"><span>Add them now (each can be undone in the Change log)</span></label></div>
+        <footer><button class="btn ghost" data-action="confirm-no">Cancel</button><button class="btn primary" data-action="link-mode-ok">Find links</button></footer>
+      </div></div>`;
   });
 }
 
@@ -990,6 +1082,18 @@ const ACTIONS = {
   },
 
   'goto-sites': () => { closeModal(); view = 'sites'; render(); },
+  'pexels-save': () => { const v = main.querySelector('#pexels-key').value.trim(); if (!v) { toast('Paste the key first.', 'error'); return; } return attempt(() => api.setImages({ pexelsKey: v }), 'Pexels key saved'); },
+  'pexels-clear': () => attempt(() => api.setImages({ pexelsKey: '' }), 'Pexels key removed'),
+  'link-older': async (el) => {
+    const mode = await chooseLinkMode();
+    if (!mode) return;
+    el.disabled = true; el.textContent = 'Finding related posts…';
+    try {
+      const r = await api.linkOlderPosts(el.dataset.id, mode);
+      toast(r.applied ? `Added ${r.applied} link${r.applied > 1 ? 's' : ''} from older posts.` : r.queued ? `${r.queued} link${r.queued > 1 ? 's are' : ' is'} waiting in Site audits, Approvals.` : 'No older posts were a good fit for a link.');
+    } catch (e) { toast(cleanErr(e), 'error'); }
+    finally { el.disabled = false; el.textContent = 'Link from older posts'; }
+  },
   'new-wordpress': () => openWordPressModal(),
   'reconnect-site': (el) => openWordPressModal(S.sites.find((x) => x.id === el.dataset.id)),
   'wp-toggle-manual': () => { const url = modalRoot.querySelector('#wp-url').value; modal.manual = !modal.manual; renderWpModal(); modalRoot.querySelector('#wp-url').value = url; },
@@ -1073,6 +1177,7 @@ const ACTIONS = {
   'goto-approvals': () => { view = 'audits'; window.auditGoto && window.auditGoto('approvals'); render(); },
   'open-audit-report': (el) => window.openAuditReport(el.dataset.id),
   'close-modal': () => closeModal(),
+  'link-mode-ok': () => { const v = modalRoot.querySelector('[name=lm]:checked')?.value; const r = modal?.resolve; modal.resolve = null; closeModal(); r && r(v); },
   'confirm-yes': () => { const r = modal?.resolve; modal.resolve = null; r && r(true); },
   'confirm-no': () => closeModal()
 };
@@ -1086,6 +1191,7 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('change', (e) => {
   const el = e.target;
+  if (el.dataset.inputImages) { attempt(() => api.setImages({ [el.dataset.inputImages]: el.value }), 'Saved'); return; }
   if (el.dataset.setting) {
     const v = el.type === 'checkbox' ? el.checked : (el.type === 'number' || el.dataset.setting === 'lockAfterMinutes') ? Number(el.value) : el.value;
     attempt(() => api.saveSettings({ [el.dataset.setting]: v }));
@@ -1093,6 +1199,12 @@ document.addEventListener('change', (e) => {
   }
   if (el.dataset.change === 'toggle-schedule') {
     attempt(() => api.toggleSchedule(el.dataset.id, el.checked), el.checked ? 'Schedule on' : 'Schedule off').catch(() => { el.checked = !el.checked; });
+    return;
+  }
+  if (el.dataset.change === 'writer-rerender') {
+    readWriterForm();
+    renderModal();
+    loadModelsForModal(false);
     return;
   }
   if (el.dataset.change === 'writer-site') {

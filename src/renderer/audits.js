@@ -15,7 +15,19 @@ const MODE_HELP = {
 };
 const RISK_LABEL = { read: 'Read-only', safe: 'Safe to auto-fix', approval: 'Needs approval', off: 'Never use' };
 const BUILTIN_HELP = { web: 'Checks pages, crawls the site, finds broken links, reads the sitemap and robots.txt, runs PageSpeed tests.', wp: 'Reads posts, pages, media and plugins, and can edit titles, excerpts, content, image alt text and post status.', google: 'Search Console, GA4 and Tag Manager data for this site.' };
-const TEMPLATE_LABEL = { agency: 'Full SEO audit (your team\'s report format)', technical: 'Technical SEO health check', content: 'Content and on-page SEO', rankings: 'Rankings, traffic and backlinks', maintenance: 'WordPress maintenance', custom: 'Write my own instructions' };
+const TEMPLATE_LABEL = { agency: 'Full SEO audit (your team\'s report format)', technical: 'Technical SEO health check', content: 'Content and on-page SEO', rankings: 'Rankings, traffic and backlinks', maintenance: 'WordPress maintenance',
+  refresh: 'Refresh posts that are losing traffic', competitors: 'Competitor watch', aiVisibility: 'AI search visibility (Ahrefs Brand Radar)', backlinks: 'Lost backlinks and reclaim emails', custom: 'Write my own instructions' };
+const NEED_LABEL = { google: 'Search Console linked to this website', wp: 'the website connected as WordPress', ahrefs: 'Ahrefs', semrush: 'Semrush', 'ahrefs|semrush': 'Ahrefs or Semrush' };
+
+function missingNeeds(d) {
+  const needs = (S.templateNeeds || {})[d.template] || [];
+  const kinds = (d.siteId ? (S.builtinBySite[d.siteId] || []) : []).map((b) => b.kind);
+  const chosen = S.connectors.filter((c) => (d.connectorIds || []).includes(c.id)).map((c) => `${c.preset || ''} ${c.name}`.toLowerCase());
+  return needs.filter((n) => {
+    if (n === 'google' || n === 'wp') return !kinds.includes(n);
+    return !n.split('|').some((x) => chosen.some((c) => c.includes(x)));
+  }).map((n) => NEED_LABEL[n] || n);
+}
 
 function auditSchedule(job) { return S.schedules.find((s) => s.id === `audit-${job.id}`); }
 function connName(id) { return S.connectors.find((c) => c.id === id)?.name || 'removed connection'; }
@@ -25,14 +37,15 @@ function jobToolNames(j) {
   if (!j.siteId && j.siteUrl && (!Array.isArray(j.builtins) || j.builtins.includes('web'))) b.push('Website checker');
   return [...b, ...(j.connectorIds || []).map(connName)];
 }
-function pendingApprovals() { return S.approvals.filter((a) => a.status === 'pending'); }
+function pendingApprovals() { return S.approvals.filter((a) => a.status === 'pending' && inClient(a.siteId, a.siteUrl)); }
 function runningRun(jobId) { return S.auditRunning.find((r) => r.jobId === jobId); }
 
 // ---------- page ----------
 function viewAudits() {
   const pending = pendingApprovals().length;
-  const tabs = [['jobs', 'Audits'], ['approvals', `Approvals${pending ? ` (${pending})` : ''}`], ['changes', 'Change log'], ['reports', 'Reports'], ['connections', 'Connections']];
-  const body = { jobs: auditJobsTab, approvals: approvalsTab, changes: changesTab, reports: reportsTab, connections: connectionsTab }[auditTab]();
+  const down = S.sites.filter((x) => x.health && x.health.status === 'down').length;
+  const tabs = [['jobs', 'Audits'], ['approvals', `Approvals${pending ? ` (${pending})` : ''}`], ['changes', 'Change log'], ['reports', 'Reports'], ['monitoring', `Monitoring${down ? ` (${down} down)` : ''}`], ['connections', 'Connections']];
+  const body = { jobs: auditJobsTab, approvals: approvalsTab, changes: changesTab, reports: reportsTab, monitoring: window.monitoringTab, connections: connectionsTab }[auditTab]();
   const running = S.auditRunning.map((r) => `
     <div class="writing-now"><div class="spinner"></div><div style="flex:1"><strong>${esc(r.jobName)}</strong> is ${r.kind === 'revert' ? 'undoing a change' : 'auditing'}${r.siteUrl ? ` ${esc(r.siteUrl)}` : ''}. ${r.toolCalls} tool calls so far, ${r.applied} changes made, ${r.queued} waiting for approval.</div>
     <button class="btn" data-action="audit-stop" data-id="${r.id}">Stop</button></div>`).join('');
@@ -41,6 +54,7 @@ function viewAudits() {
       <div><h1>Site audits</h1><p class="sub">Scheduled checks of your websites using tools you connect, like Ahrefs, Semrush and WPVibe. You choose how much each audit may change on its own.</p></div>
       <button class="btn primary" data-action="audit-new">New audit</button>
     </div>
+    ${clientBanner()}
     ${running}
     <div class="seg tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" class="${auditTab === k ? 'on' : ''}" aria-selected="${auditTab === k}" data-action="audit-tab" data-tab="${k}">${l}</button>`).join('')}</div>
     <div class="tab-body">${body}</div>`;
@@ -50,7 +64,7 @@ function auditJobsTab() {
   if (!S.connectors.length && !S.sites.length) {
     return `<div class="list"><div class="empty"><p>Add a website first. Audits check and fix the websites you add in Websites, optionally with extra tools like Ahrefs or Semrush.</p><button class="btn primary" data-action="nav" data-view="sites">Go to Websites</button></div></div>`;
   }
-  const rows = S.auditJobs.map((j) => {
+  const rows = S.auditJobs.filter((j) => inClient(j.siteId, j.siteUrl)).map((j) => {
     const s = auditSchedule(j);
     const last = S.auditRuns.find((r) => r.jobId === j.id);
     const run = runningRun(j.id);
@@ -60,6 +74,7 @@ function auditJobsTab() {
         <div>
           <div class="title">${esc(j.name)} ${modeChip(j.mode)}</div>
           <div class="meta">${esc(j.siteUrl || '')}${j.siteUrl ? '. ' : ''}${s ? esc(describeSchedule(s)) : 'Runs only when you click Run now'}. Uses ${esc(jobToolNames(j).join(', ') || 'no tools')} with ${esc(PROVIDER_SHORT[j.provider] || j.provider)}.</div>
+          ${j.thenJobId ? `<div class="meta">Then runs "${esc((S.auditJobs.find((x) => x.id === j.thenJobId) || {}).name || 'a removed audit')}"</div>` : ''}
           <div class="meta">${last ? `Last run ${fmtRel(last.finishedAt || last.startedAt)}: ${last.status === 'failed' ? `<span class="err">failed, ${esc(last.error || '')}</span>` : `${last.applied} changed, ${last.queued} for approval`}` : 'Not run yet'}</div>
         </div>
         <div class="meta" style="text-align:right">${run ? 'Running now' : s && s.enabled && s.nextRunAt ? `Next: ${fmtDateTime(s.nextRunAt)}<br>${fmtRel(s.nextRunAt)}` : j.enabled === false ? 'Off' : ''}</div>
@@ -90,6 +105,7 @@ function approvalsTab() {
       <div>
         <div class="title">${esc(a.reason || a.tool)}</div>
         <div class="meta">${esc(a.connectorName)}: ${esc(a.tool)} <span class="chip risk-${a.risk}">${esc(RISK_LABEL[a.risk] || a.risk)}</span> · ${esc(a.jobName)}${a.siteUrl ? `, ${esc(a.siteUrl)}` : ''} · ${fmtRel(a.createdAt)}</div>
+        ${a.preview ? `<div class="preview-line">${esc(a.preview).replace(/\[([^\]]+)\]/, '<mark>$1</mark>')}</div>` : ''}
         ${a.note ? `<div class="meta">${esc(a.note)}</div>` : ''}
         ${argsBlock(a)}
       </div>
@@ -98,7 +114,7 @@ function approvalsTab() {
         <button class="btn ghost" data-action="approval-no" data-id="${a.id}">Reject</button>
       </div>
     </div>`).join('');
-  const history = S.approvals.filter((a) => a.status !== 'pending').slice(0, 30).map((a) => `
+  const history = S.approvals.filter((a) => a.status !== 'pending' && inClient(a.siteId, a.siteUrl)).slice(0, 30).map((a) => `
     <li><time>${fmtRel(a.decidedAt || a.createdAt)}</time><div><span class="chip st-${a.status}">${esc(a.status)}</span> ${esc(a.reason || a.tool)} <span class="muted small">${esc(a.connectorName)}: ${esc(a.tool)}</span></div></li>`).join('');
   return `
     ${pending.length ? `<div class="btn-row bulk"><span class="muted small">${approvalPick.size} selected</span>
@@ -110,11 +126,11 @@ function approvalsTab() {
 }
 
 function changesTab() {
-  const rows = S.changes.slice(0, 200).map((c) => `
+  const rows = S.changes.filter((c) => inClient(c.siteId, c.siteUrl)).slice(0, 200).map((c) => `
     <div class="row writer-row top">
       <div>
         <div class="title"><span class="chip st-${c.status}">${esc(c.status)}</span> ${esc(c.reason || c.tool)}</div>
-        <div class="meta">${esc(c.connectorName)}: ${esc(c.tool)} · ${esc(c.jobName)}${c.siteUrl ? `, ${esc(c.siteUrl)}` : ''} · ${c.via === 'approval' ? 'approved by you' : c.via === 'undo' ? 'undo' : 'made by the AI'} · ${fmtDateTime(c.at)}</div>
+        <div class="meta">${esc(c.connectorName)}: ${esc(c.tool)} · ${esc(c.jobName)}${c.siteUrl ? `, ${esc(c.siteUrl)}` : ''} · ${c.via === 'approval' ? 'approved by you' : c.via === 'undo' ? 'undo' : c.via === 'auto-link' ? 'added by a writer' : 'made by the AI'} · ${fmtDateTime(c.at)}</div>
         ${argsBlock(c)}
       </div>
       <div class="btn-row">${c.status === 'applied' ? `<button class="btn" data-action="change-undo" data-id="${c.id}">Undo</button>` : ''}</div>
@@ -124,7 +140,7 @@ function changesTab() {
 }
 
 function reportsTab() {
-  const runs = S.auditRuns.filter((r) => r.status !== 'running');
+  const runs = S.auditRuns.filter((r) => r.status !== 'running' && inClient((S.auditJobs.find((j) => j.id === r.jobId) || {}).siteId, r.siteUrl));
   if (!runs.length) return '<div class="list"><div class="empty"><p>Reports appear here after each audit.</p></div></div>';
   if (!selectedRunId || !runs.find((r) => r.id === selectedRunId)) selectedRunId = runs[0].id;
   const list = runs.map((r) => `
@@ -294,6 +310,7 @@ function renderAuditModal() {
         </fieldset>
         <fieldset><legend>What to check</legend>
           <div class="field"><label for="a-tpl">Starting point</label><select id="a-tpl" name="template" data-change="audit-template">${Object.entries(TEMPLATE_LABEL).map(([k, l]) => `<option value="${k}" ${d.template === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+          ${(() => { const miss = missingNeeds(d); return miss.length ? `<p class="warn small">This starting point works best with ${esc(miss.join(' and '))}. ${miss.some((m) => /Ahrefs|Semrush/.test(m)) ? 'Add it under Connections and tick it above.' : 'Set it up in Websites.'}</p>` : ''; })()}
           <div class="field"><label for="a-instr">Instructions</label><textarea id="a-instr" name="instructions" style="min-height:120px">${esc(d.instructions)}</textarea>
             <span class="hint">Edit freely. Be specific about anything it must never touch.</span></div>
         </fieldset>
@@ -324,6 +341,9 @@ function renderAuditModal() {
             <span class="inline" style="width:auto"><input type="number" min="1" value="20" style="width:76px" id="a-rem-amt" aria-label="Reminder amount"><select style="width:auto" id="a-rem-unit" aria-label="Reminder unit"><option value="1">minutes</option><option value="60">hours</option><option value="1440">days</option></select><button class="btn" data-action="audit-rem-add">Add reminder</button></span></div>
           </div>` : ''}
           <label class="check"><input type="checkbox" name="notifyOnComplete" ${d.notifyOnComplete !== false ? 'checked' : ''}><span>Notify me when each audit finishes</span></label>
+          <div class="field" style="margin-top:10px"><label for="a-then">When it finishes, run</label><select id="a-then" name="thenJobId">
+            <option value="">Nothing else</option>${S.auditJobs.filter((j) => j.id !== d.id).map((j) => `<option value="${j.id}" ${d.thenJobId === j.id ? 'selected' : ''}>${esc(j.name)}</option>`).join('')}</select>
+            <span class="hint">Chains audits into a workflow: the next audit starts with this one's report, for example a technical audit followed by a content refresh.</span></div>
         </fieldset>
       </div>
       <footer><button class="btn ghost" data-action="close-modal">Cancel</button>
@@ -340,7 +360,7 @@ function readAuditForm() {
   const q = (sel) => modalRoot.querySelector(sel);
   const sid = q('[name="siteId"]'); if (sid) d.siteId = sid.value;
   if (modalRoot.querySelector('[name=builtin]')) d.builtins = [...modalRoot.querySelectorAll('[name=builtin]:checked')].map((el) => el.value);
-  for (const n of ['name', 'siteUrl', 'instructions', 'provider', 'model', 'template', 'maxToolCalls', 'maxChanges', 'maxMinutes']) { const el = q(`[name="${n}"]`); if (el) d[n] = el.value; }
+  for (const n of ['name', 'siteUrl', 'instructions', 'provider', 'model', 'template', 'maxToolCalls', 'maxChanges', 'maxMinutes', 'thenJobId']) { const el = q(`[name="${n}"]`); if (el) d[n] = el.value; }
   d.connectorIds = [...modalRoot.querySelectorAll('[name=conn]:checked')].map((el) => el.value);
   const mode = q('[name=mode]:checked'); if (mode) d.mode = mode.value;
   const ack = q('[name=fullAck]'); d.fullAck = ack ? ack.checked : d.fullAck;
@@ -493,10 +513,15 @@ document.addEventListener('change', (e) => {
     const known = Object.values(S.auditTemplates);
     if (tpl !== 'custom' && (!instr.value.trim() || known.includes(instr.value.trim()))) instr.value = S.auditTemplates[tpl];
     if (tpl === 'custom' && known.includes(instr.value.trim())) instr.value = '';
+    readAuditForm();
+    renderAuditModal();
   } else if (ch === 'audit-site') {
     readAuditForm();
     modal.draft.builtins = null;
     if (modal.draft.siteId) modal.draft.siteUrl = '';
+    renderAuditModal();
+  } else if (modal && modal.type === 'audit' && el.name === 'conn') {
+    readAuditForm();
     renderAuditModal();
   } else if (ch === 'audit-mode' || ch === 'audit-provider') {
     readAuditForm();

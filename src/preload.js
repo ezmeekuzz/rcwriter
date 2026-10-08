@@ -41,6 +41,13 @@ contextBridge.exposeInMainWorld('api', {
   testSite: (id) => invoke('site:test', id),
   deleteSite: (id) => invoke('site:delete', id),
   publishArticle: (id, siteId, opts) => invoke('article:publish', id, siteId, opts),
+  linkOlderPosts: (id, mode) => invoke('article:linkOlder', id, mode),
+  setImages: (cfg) => invoke('images:set', cfg),
+  setSiteMonitor: (id, cfg) => invoke('site:setMonitor', id, cfg),
+  checkSiteNow: (id) => invoke('site:checkNow', id),
+  setSiteClient: (id, clientId) => invoke('site:setClient', id, clientId),
+  saveClient: (c) => invoke('client:save', c),
+  deleteClient: (id) => invoke('client:delete', id),
 
   googleServiceAccount: () => invoke('google:serviceAccount'),
   googleOAuth: (id, secret) => invoke('google:oauth', id, secret),

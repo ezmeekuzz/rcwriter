@@ -46,14 +46,15 @@ function wpUrl(base, route, query = {}, mode = 'pretty') {
   return `${base}/?rest_route=${encodeURIComponent(route)}${qs ? `&${qs}` : ''}`;
 }
 
-async function wpRequest(site, auth, route, { method = 'GET', query = {}, body, purpose = 'publish' } = {}) {
+async function wpRequest(site, auth, route, { method = 'GET', query = {}, body, raw, purpose = 'publish' } = {}) {
   const headers = { Accept: 'application/json' };
   if (auth) headers.Authorization = `Basic ${Buffer.from(`${auth.user}:${auth.pass}`).toString('base64')}`;
   if (body) headers['Content-Type'] = 'application/json';
+  if (raw) { headers['Content-Type'] = raw.type; headers['Content-Disposition'] = `attachment; filename="${raw.filename}"`; }
   const modes = site.restMode ? [site.restMode] : ['pretty', 'plain'];
   let last;
   for (const mode of modes) {
-    const { res, json, text } = await fetchJson(wpUrl(site.url, route, query, mode), { method, headers, body: body ? JSON.stringify(body) : undefined }, purpose);
+    const { res, json, text } = await fetchJson(wpUrl(site.url, route, query, mode), { method, headers, body: raw ? raw.body : body ? JSON.stringify(body) : undefined }, purpose);
     if (res.ok && json !== null) { site.restMode = mode; return json; }
     last = { res, json, text };
     if (res.status !== 404 || (json && json.code && json.code !== 'rest_no_route')) break;
@@ -136,20 +137,45 @@ function splitList(s) {
   return String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
 }
 
-async function publish(site, secret, article, fileText, { status = 'draft', categories = '', tags = '' } = {}) {
+// Uploads an image to the media library with alt text. Returns { id, url }.
+async function wpUploadImage(site, auth, image, title) {
+  const media = await wpRequest(site, auth, '/wp/v2/media', { method: 'POST', raw: { body: image.buffer, type: image.mime, filename: image.filename } });
+  const meta = { alt_text: image.alt || '', title: title || image.alt || '' };
+  if (image.credit) meta.caption = image.creditUrl ? `<a href="${image.creditUrl}">${image.credit}</a>` : image.credit;
+  try { await wpRequest(site, auth, `/wp/v2/media/${media.id}`, { method: 'POST', body: meta }); } catch { /* the image is still usable without alt text */ }
+  return { id: media.id, url: media.source_url };
+}
+
+// image: { buffer, mime, filename, alt, credit } (optional)
+// schema: a JSON-LD object (optional), added to the post as a script tag
+async function publish(site, secret, article, fileText, { status = 'draft', categories = '', tags = '', image = null, schema = null } = {}) {
   const parts = splitArticle(fileText);
   const title = parts.title || article.title;
+  const ld = (s) => `\n<script type="application/ld+json">${JSON.stringify(s).replace(/</g, '\\u003c')}</script>\n`;
 
   if (site.type === 'wordpress') {
     const auth = { user: site.username, pass: secret };
-    const body = { title, content: parts.html, status: ['draft', 'pending', 'publish', 'private'].includes(status) ? status : 'draft' };
+    const notes = [];
+    let media = null;
+    if (image) {
+      try { media = await wpUploadImage(site, auth, image, title); } catch (e) { notes.push(`Featured image not uploaded: ${e.message}`); }
+    }
+    if (schema && media && media.url) {
+      for (const node of schema['@graph'] || []) if (/Article|BlogPosting/.test(node['@type']) && !node.image) node.image = media.url;
+    }
+    const body = { title, content: parts.html + (schema ? ld(schema) : ''), status: ['draft', 'pending', 'publish', 'private'].includes(status) ? status : 'draft' };
     if (parts.excerpt) body.excerpt = parts.excerpt;
+    if (media) body.featured_media = media.id;
     const cats = await wpTermIds(site, auth, 'categories', splitList(categories));
     const tgs = await wpTermIds(site, auth, 'tags', splitList(tags));
     if (cats.length) body.categories = cats;
     if (tgs.length) body.tags = tgs;
     const post = await wpRequest(site, auth, '/wp/v2/posts', { method: 'POST', body });
-    return { remoteId: post.id, url: post.link, editUrl: `${site.url}/wp-admin/post.php?post=${post.id}&action=edit`, status: post.status };
+    if (schema) {
+      const raw = post.content && post.content.raw;
+      if (typeof raw === 'string' && !raw.includes('application/ld+json')) notes.push('WordPress removed the schema markup because this user may not add scripts. Connect with an Administrator account, or add the schema with your SEO plugin.');
+    }
+    return { remoteId: post.id, url: post.link, editUrl: `${site.url}/wp-admin/post.php?post=${post.id}&action=edit`, status: post.status, mediaId: media ? media.id : null, imageUrl: media ? media.url : null, notes };
   }
 
   if (site.type === 'webhook') {
@@ -166,7 +192,9 @@ async function publish(site, secret, article, fileText, { status = 'draft', cate
       words: article.words,
       createdAt: article.createdAt,
       categories: splitList(categories),
-      tags: splitList(tags)
+      tags: splitList(tags),
+      featuredImage: image ? { filename: image.filename, mime: image.mime, alt: image.alt, credit: image.credit || '', base64: image.buffer.toString('base64') } : null,
+      schema: schema || null
     });
     const headers = { 'Content-Type': 'application/json', 'User-Agent': 'RCWriter' };
     if (secret) headers['X-RCWriter-Signature'] = `sha256=${crypto.createHmac('sha256', secret).update(payload).digest('hex')}`;
@@ -196,4 +224,4 @@ async function test(site, secret) {
   throw new Error('Unknown website type.');
 }
 
-module.exports = { normalizeUrl, wpDiscover, wpAuthorizeUrl, wpVerify, wpRequest, publish, test, splitArticle };
+module.exports = { normalizeUrl, wpDiscover, wpAuthorizeUrl, wpVerify, wpRequest, wpUploadImage, publish, test, splitArticle };

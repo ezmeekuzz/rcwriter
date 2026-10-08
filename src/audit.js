@@ -19,8 +19,15 @@ const TEMPLATES = {
   technical: 'Run a technical SEO health check. Look for broken links and 4xx/5xx pages, redirect chains, missing or duplicate title tags and meta descriptions, missing H1s, missing image alt text, slow or very large pages, and indexing problems. Prioritise by impact.',
   content: 'Review on-page SEO and content quality. Find posts and pages with weak or missing titles and meta descriptions, thin content, missing internal links between related posts, and keywords the site ranks on page 2 for that a small on-page improvement could push up. Suggest or make specific improvements.',
   rankings: 'Check how the site is doing in search. Compare current organic keywords, traffic and backlinks with the last run, flag keywords that dropped noticeably, lost backlinks and new competitor gains, and recommend what to do about each.',
-  maintenance: 'Do routine WordPress maintenance checks: pages with errors, broken images, outdated content that mentions old years or prices, posts missing featured images or categories, and anything visibly broken. Fix what is safe and list the rest.'
+  maintenance: 'Do routine WordPress maintenance checks: pages with errors, broken images, outdated content that mentions old years or prices, posts missing featured images or categories, and anything visibly broken. Fix what is safe and list the rest.',
+  refresh: 'Refresh posts that are losing traffic. Use gsc_compare_periods (by page, 28 days) to find posts whose clicks fell by 30% or more and had at least 20 clicks in the earlier period. For up to 3 of the biggest losers: check which queries they rank for now (gsc_search_performance filtered to the page), read the post with wp_get_content, then update it: correct outdated facts, years and prices, expand thin sections to answer those queries fully, add a short FAQ if it helps, and improve the title and excerpt for the main query. Keep the URL, the author\'s voice and everything that is still accurate. Use wp_update_content and wp_update_title_excerpt. In the report, list each post with its clicks before and after and what you changed.',
+  competitors: 'Competitor watch. Competitors: (list their domains here, or leave this line and let the AI find the top 3 organic competitors with Ahrefs or Semrush). For each competitor, find keywords they gained or improved recently, new pages that are getting traffic, and keywords they rank for in the top 10 that this site does not rank for at all. Compare with the previous report if there is one. Finish with the 5 best article ideas for this site (keyword, monthly searches, difficulty, which competitor page to beat) and anything urgent.',
+  aiVisibility: 'Check how visible this brand is in AI search (ChatGPT, Perplexity, Google AI Overviews and AI Mode, Gemini, Copilot) using Ahrefs Brand Radar. Report: mentions and share of voice compared with the main competitors, how it changed since the previous report, which of the site\'s pages AI answers cite, which competitor pages get cited instead, and the prompts or topics where competitors appear and this brand does not. Recommend specific content and on-page changes to get cited more.',
+  backlinks: 'Backlink check. Using Ahrefs or Semrush: list backlinks and referring domains lost recently (most authoritative first), broken backlinks pointing to pages on this site that now return 404, and new referring domains. Compare with the previous report if there is one. For broken backlinks, recommend the best page to redirect each one to. For the 5 most valuable lost links that can be reclaimed, write a short, polite outreach email to the linking site\'s owner (subject line and body, ready to copy). Do not send anything.'
 };
+
+// Connections each template works best with, shown as a hint in the audit form.
+const TEMPLATE_NEEDS = { refresh: ['google', 'wp'], competitors: ['ahrefs|semrush'], aiVisibility: ['ahrefs'], backlinks: ['ahrefs|semrush'] };
 
 const RESULT_LIMIT = 20000;
 const guard = require('./hostguard');
@@ -204,7 +211,18 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
   }
 
   // ---------- prompts ----------
+  function previousReport(job) {
+    if (job.kind === 'research' || String(job.id).startsWith('revert-')) return '';
+    const last = d().auditRuns.find((r) => r.jobId === job.id && r.status === 'done' && r.reportPath && r.kind !== 'revert');
+    if (!last) return '';
+    try {
+      const text = fs.readFileSync(last.reportPath, 'utf8').replace(/^---[\s\S]*?\n---\n/, '');
+      return `## Your previous report (${new Date(last.startedAt).toISOString().slice(0, 10)})\nUse it to compare and to report what changed since then. Don't repeat fixes that were already done.\n\n${clip(text, 7000)}`;
+    } catch { return ''; }
+  }
+
   function systemPrompt(job) {
+    if (job.systemOverride) return job.systemOverride;
     const modeRules = {
       report: 'You may only read and analyse. You cannot change the site. Every fix goes in your report as a recommendation.',
       approve: 'You may propose changes by calling the tools that change the site. RCWriter will not apply them; it queues each one for the owner to approve. Propose precise, ready-to-apply changes.',
@@ -215,6 +233,8 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       'You are an experienced website auditor and SEO specialist working for the site owner.',
       `Website: ${job.siteUrl || '(see the connected tools)'}`,
       `## Owner's instructions\n${job.instructions || TEMPLATES.technical}`,
+      job.context ? `## Why this audit is running now\n${job.context}` : '',
+      previousReport(job),
       `## What you are allowed to do (${MODES[job.mode]})\n${modeRules}`,
       [
         '## Rules',
@@ -261,7 +281,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       '-c', 'mcp_servers.rcwriter.tool_timeout_sec=900'];
     if (run.job.model) args.push('-m', run.job.model);
     args.push('-');
-    const input = `${systemPrompt(run.job)}\n\n# Task\nRun the audit now using the "rcwriter" tools, then write the report. Do not run shell commands or edit local files; everything you need is in the rcwriter tools.`;
+    const input = `${systemPrompt(run.job)}\n\n# Task\n${run.job.task || 'Run the audit now using the "rcwriter" tools, then write the report.'} Do not run shell commands or edit local files; everything you need is in the rcwriter tools.`;
     try {
       const r = await codex.run(codexCmd(), args, { input, cwd: dir, timeoutMs: (Number(run.job.maxMinutes) || 30) * 60000, onSpawn: (child) => { run.child = child; } });
       let text = '';
@@ -303,7 +323,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
     const key = store.getKey(job.provider);
     if (!key && job.provider !== 'custom') throw new Error(`Add an API key for ${job.provider} under AI providers.`);
     const system = systemPrompt(job);
-    const task = 'Run the audit now using your tools, then write the report.';
+    const task = job.task || 'Run the audit now using your tools, then write the report.';
     const maxTurns = (Number(job.maxToolCalls) || 60) + 8;
     const deadline = Date.now() + (Number(job.maxMinutes) || 30) * 60000;
     const req = (url, headers, body) => providers.request(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) }, { retries: 2, timeoutMs: 10 * 60000 });
@@ -396,8 +416,8 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
   }
 
   // ---------- public ----------
-  async function runJob(jobIn, { kind = 'audit', schedule = null } = {}) {
-    const job = { maxToolCalls: 60, maxChanges: 25, maxMinutes: 30, ...jobIn };
+  async function runJob(jobIn, { kind = 'audit', schedule = null, context = '', chainDepth = 0 } = {}) {
+    const job = { maxToolCalls: 60, maxChanges: 25, maxMinutes: 30, ...jobIn, ...(context ? { context } : {}) };
     if (!(job.connectorIds || []).length && !builtins.sources(job).length) throw new Error('Choose a website or at least one connection for this audit.');
     if ([...runs.values()].some((r) => r.job.id === job.id && kind === 'audit')) throw new Error(`"${job.name}" is already running.`);
 
@@ -432,7 +452,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
     } finally {
       rec.finishedAt = new Date().toISOString();
       runs.delete(rec.id);
-      await connectors.closeAll();
+      if (!runs.size) await connectors.closeAll(); // keep connections other runs are using
       store.log(rec.status === 'failed' ? 'error' : 'audit',
         rec.status === 'failed' ? `Audit "${job.name}" failed: ${rec.error}`
           : `Audit "${job.name}" ${rec.status === 'stopped' ? 'was stopped' : 'finished'}: ${rec.applied} change${rec.applied === 1 ? '' : 's'} made, ${rec.queued} waiting for approval.`,
@@ -446,8 +466,37 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
             : `${job.name}: ${rec.applied} change${rec.applied === 1 ? '' : 's'} made, ${rec.queued} waiting for your approval, ${rec.failed} failed.`,
           { view: 'audits', tab: rec.queued ? 'approvals' : 'reports', runId: rec.id });
       }
+      // Chained workflow: start the follow-up audit with this report as context.
+      const next = kind === 'audit' && rec.status === 'done' && job.thenJobId && chainDepth < 3 ? d().auditJobs.find((j) => j.id === job.thenJobId && j.id !== job.id) : null;
+      if (next) {
+        let report = '';
+        try { report = fs.readFileSync(rec.reportPath, 'utf8').replace(/^---[\s\S]*?\n---\n/, ''); } catch { /* none */ }
+        store.log('audit', `"${job.name}" finished, so "${next.name}" is starting next.`);
+        setTimeout(() => runJob(next, { context: `This audit was started automatically after "${job.name}" finished. Its report:\n\n${clip(report, 8000)}`, chainDepth: chainDepth + 1 })
+          .catch((e) => { store.log('error', `"${next.name}" could not start after "${job.name}": ${e.message}`); store.save(); onChange(); }), 3000);
+      }
     }
     return rec;
+  }
+
+  // Read-only research with the same tools and engines, used by writers to pick
+  // keywords. Nothing is recorded as an audit run. Returns the AI's final text.
+  async function research({ name, siteId, siteUrl, connectorIds = [], builtinKinds = ['google'], provider, model, system, task, maxToolCalls = 20, maxMinutes = 15 }) {
+    const job = { id: `research-${uid()}`, kind: 'research', name, siteId, siteUrl, connectorIds, builtins: builtinKinds, provider, model, mode: 'report',
+      maxToolCalls, maxChanges: 0, maxMinutes, systemOverride: system, task };
+    const rec = { id: uid(), kind: 'research', jobId: job.id, jobName: name, toolCalls: 0, applied: 0, queued: 0, blocked: 0, failed: 0, startedAt: new Date().toISOString() };
+    const run = { rec, job, token: crypto.randomBytes(24).toString('hex'), notes: [], tools: [], stopped: false, child: null };
+    runs.set(rec.id, run);
+    try {
+      run.tools = (await buildToolset(job, run)).filter((t) => !t.write);
+      if (!run.tools.length) throw new Error(run.notes[0] || 'No research tools are available. Connect Ahrefs or Semrush, or link Search Console to the website.');
+      const text = provider === 'chatgpt' ? await runCodex(run) : await runApi(run);
+      if (!rec.toolCalls) throw new Error("The AI didn't use any research tools.");
+      return { text, toolCalls: rec.toolCalls, notes: run.notes };
+    } finally {
+      runs.delete(rec.id);
+      if (!runs.size) await connectors.closeAll(); // keep connections other runs are using
+    }
   }
 
   function stop(runId) {
@@ -519,7 +568,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
     return true;
   }
 
-  return { runJob, stop, decide, revert, running: () => [...runs.values()].map((r) => r.rec), MODES, TEMPLATES, policy, buildToolset };
+  return { runJob, research, stop, decide, revert, running: () => [...runs.values()].filter((r) => r.rec.kind !== 'research').map((r) => r.rec), MODES, TEMPLATES, policy, buildToolset };
 }
 
-module.exports = { createAuditor, MODES, TEMPLATES };
+module.exports = { createAuditor, MODES, TEMPLATES, TEMPLATE_NEEDS };

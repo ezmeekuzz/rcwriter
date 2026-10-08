@@ -25,6 +25,24 @@ A desktop app that writes articles for you on a schedule, using Claude, ChatGPT,
   - *Your Google account:* create a "Desktop app" OAuth client in Google Cloud and sign in with it. Publish the consent screen so sign-ins don't expire after 7 days.
 - **PageSpeed Insights key (optional):** raises Google's limit on speed tests.
 
+## Smarter writing (1.6)
+
+Each writer can now do more around every article, under **Before publishing** and **Where to publish**:
+
+- **Keyword research first:** set the topic order to "Research a keyword first". Before each article, the AI uses Ahrefs or Semrush (and Search Console, if linked) to find a keyword around your topics with real searches and low difficulty, skips anything the site already covers or ranks for (no cannibalisation), and writes for it. Used keywords are remembered. If research fails, the writer falls back to its topics.
+- **AI editor check:** a second pass checks facts against the writer's knowledge, the instructions, voice and length, and scores the article out of 10. It can rewrite once to fix what it found. Articles below your minimum score are saved as drafts instead of going live.
+- **Featured image with alt text:** a free Pexels stock photo (add a free key in Settings, Images) or an image generated with your OpenAI API key. It's uploaded to WordPress as the featured image with alt text and credit, and saved next to the article file.
+- **Schema markup:** Article, FAQ (from the article's FAQ section) and Local business JSON-LD, added to the post. WordPress keeps it when the connected user is an Administrator; RCWriter tells you if WordPress removed it. A `.schema.json` copy is saved next to the article.
+- **Links from older posts:** when an article goes live, the AI picks up to 3 related older posts and links a natural phrase in each to the new one, either for you to approve or automatically. Every link is in the Change log with **Undo**. Articles also have a **Link from older posts** button.
+
+## Clients and monitoring (1.6)
+
+- **Clients:** group websites by client under **General → Clients**. The client picker at the top of the sidebar filters writers, schedules, articles, websites, audits, approvals, the change log and reports to one client.
+- **Monitoring** (Site audits → Monitoring, or **Monitoring** on a website): uptime checks every 15 minutes to 6 hours (paced like everything else, and repeated once before alerting), SSL certificate expiry and validity (a TLS handshake that loads no page), and a daily Search Console check that alerts you when clicks fall week on week. A traffic drop can **start an audit by itself**, which receives the drop and the pages that lost the most clicks.
+- **Chained audits:** "When it finishes, run" starts another audit with the first one's report, for example a technical audit followed by a content refresh.
+- **New audit starting points:** refresh posts that are losing traffic, competitor watch, AI search visibility (Ahrefs Brand Radar), and lost backlinks with ready-to-send reclaim emails. Every audit now sees its previous report, so it can say what changed.
+- **New built-in tools:** `gsc_compare_periods` (Search Console losers and gainers between two periods) and `wp_add_internal_link` (adds one link around an existing phrase, with undo).
+
 **Writers use site data:** with a WordPress site selected, a writer reads the site's published posts so it doesn't repeat them and links to related ones. With Search Console linked, it aims articles at searches the site already appears for but isn't in the top 3 for yet.
 
 ## Site audits
@@ -32,7 +50,7 @@ A desktop app that writes articles for you on a schedule, using Claude, ChatGPT,
 A separate module (sidebar: **Site audits → Audits**) that checks your websites on a schedule using tools you connect, and fixes problems as far as you allow.
 
 - **Built-in tools (no extra connector needed):**
-  - *Website checker:* single-page SEO check, crawl of up to 50 pages, broken links, URL status checks, sitemap, robots.txt, and PageSpeed (score, LCP, CLS, page weight, unused CSS/JS, real-user Core Web Vitals).
+  - *Website checker:* single-page SEO check, crawl of up to 30 pages, broken links, URL status checks, sitemap, robots.txt, and PageSpeed (score, LCP, CLS, page weight, unused CSS/JS, real-user Core Web Vitals).
   - *WordPress:* reads posts, pages, media and plugins. It can edit titles, excerpts, content and image alt text (marked safe), and change post status or activate and deactivate plugins (marked needs approval). It never deletes. Edits save the old value, so **Undo** restores it directly.
   - *Google data:* Search Console performance, URL Inspection and sitemaps, GA4 reports, and the live Tag Manager container.
 - **Connections:** add Ahrefs, Semrush or WPVibe with one click, or any other MCP connector by URL. You sign in once in your browser (or paste an API key). RCWriter holds these sign-ins itself; connectors added inside ChatGPT or Claude are not shared with other apps.
@@ -142,6 +160,9 @@ src/gateway.js     Local tool bridge used with the ChatGPT subscription
 src/builtin.js     Built-in audit tools: website checker, WordPress, Google data
 src/google.js      Search Console, GA4, Tag Manager and PageSpeed
 src/hostguard.js   Paces, caches and pauses all direct requests to websites
+src/pipeline.js    Keyword research, quality check, images, schema and links around each article
+src/enhance.js     Editor check, image, schema and internal-link helpers
+src/monitor.js     Uptime, SSL and traffic-drop monitoring
 src/lock.js        App password
 src/codex-install.js  One-click Codex download
 build/installer.nsh   Installer password page
@@ -152,6 +173,6 @@ src/renderer/      The interface (HTML, CSS, JS)
 
 ## Ideas for next steps
 
-- Featured images for WordPress posts.
-- Add a review step so articles wait for approval before publishing.
-- Export to HTML or .docx alongside Markdown.
+- Monthly client SEO reports and audit reports as Word and PDF files.
+- Gmail sign-in for client emails, tasks and weekly update drafts.
+- Social posts through Buffer and webhooks, and a monthly newsletter draft.

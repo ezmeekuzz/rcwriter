@@ -285,3 +285,26 @@ p.warn.small { font-size: 12.5px; }
 .inline-pace select { width: auto; padding: 3px 6px; font-size: 12.5px; }
 .paused-note { margin-top: 8px; padding: 10px 12px; border-radius: var(--radius-s); background: var(--marigold-wash); color: var(--marigold-text); font-size: 12.5px; line-height: 1.5; }
 .paused-note .btn { margin-left: 6px; }
+
+/* 1.6: clients, monitoring, writer extras */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#client-pick { padding: 0 6px 14px; }
+#client-pick select { width: 100%; font-size: 13px; }
+.client-banner { margin: 0 0 14px; padding: 8px 12px; border-radius: var(--radius-s); background: var(--surface-2); border: 1px solid var(--line); font-size: 13px; }
+.client-sites { margin: 6px 0; display: grid; gap: 3px; font-size: 13px; }
+.hdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; background: var(--line); }
+.hdot.h-up { background: var(--ok); }
+.hdot.h-down { background: var(--danger); }
+.hdot.h-unknown { background: var(--marigold); }
+.subpanel { margin: 4px 0 12px; padding: 12px 14px; border-radius: var(--radius-s); background: var(--surface-2); border: 1px solid var(--line); }
+.preview-line { margin: 6px 0; padding: 8px 10px; border-left: 3px solid var(--action); background: var(--surface-2); font: 13.5px/1.5 var(--read); }
+.preview-line mark { background: var(--marigold-wash); color: inherit; padding: 0 2px; border-radius: 3px; }
+details.quality { margin: 0 0 16px; padding: 10px 14px; border-radius: var(--radius-s); font: 13.5px/1.5 var(--ui); }
+details.quality.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+details.quality.low { background: var(--marigold-wash); color: var(--marigold-text); }
+details.quality summary { cursor: pointer; }
+details.quality ul { margin: 8px 0 0; padding-left: 20px; }
+figure.feature { margin: 0 0 20px; }
+figure.feature img { width: 100%; max-height: 360px; object-fit: cover; border-radius: var(--radius-m); display: block; }
+figure.feature figcaption { margin-top: 6px; font: 12.5px/1.4 var(--ui); color: var(--ink-soft); }
+.client-banner a { color: var(--action); }

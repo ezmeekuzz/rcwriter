@@ -146,4 +146,4 @@ async function run({ writer, topicOverride, schedule, settings, providerCfg, gen
   };
 }
 
-module.exports = { run, buildPrompts, pickTopic, extractTitle, slugify };
+module.exports = { run, buildPrompts, pickTopic, extractTitle, slugify, countWords, readKnowledgeFiles };

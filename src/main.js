@@ -12,7 +12,9 @@ const codex = require('./codex');
 const codexInstall = require('./codex-install');
 const lock = require('./lock');
 const { PRESETS, createConnectors } = require('./connectors');
-const { createAuditor, MODES, TEMPLATES } = require('./audit');
+const { createAuditor, MODES, TEMPLATES, TEMPLATE_NEEDS } = require('./audit');
+const { createPipeline } = require('./pipeline');
+const { createMonitor, DEFAULTS: MONITOR_DEFAULTS } = require('./monitor');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
 const hostGuard = require('./hostguard');
@@ -33,6 +35,8 @@ let connectorMgr = null;
 let auditor = null;
 let google = null;
 let builtins = null;
+let pipeline = null;
+let monitor = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
 let locked = false;
@@ -173,7 +177,9 @@ function publicState() {
     settings: d.settings,
     providers: provs,
     writers: d.writers,
-    sites: d.sites.map(({ secret, ...rest }) => ({ ...rest, hasSecret: !!secret, pace: rest.pace || 'gentle', access: hostGuard.hostStatus(hostGuard.hostOf(rest.url)) })),
+    sites: d.sites.map(({ secret, ...rest }) => ({ ...rest, hasSecret: !!secret, pace: rest.pace || 'gentle', access: hostGuard.hostStatus(hostGuard.hostOf(rest.url)),
+      monitor: { ...MONITOR_DEFAULTS, ...(rest.monitor || {}) }, health: monitor ? monitor.status(rest.id) : null })),
+    clients: d.clients || [],
     paces: Object.fromEntries(Object.entries(hostGuard.PACES).map(([k, v]) => [k, { label: v.label, gapMs: v.gapMs, auditPerDay: v.auditPerDay }])),
     connectors: d.connectors.map(({ secret, oauthTokens, oauthClient, codeVerifier, oauthState, ...rest }) => ({ ...rest, hasSecret: !!secret, signedIn: rest.auth === 'oauth' ? !!oauthTokens : rest.auth === 'apikey' ? !!secret : true })),
     connectorPresets: PRESETS,
@@ -186,6 +192,8 @@ function publicState() {
     changes: d.changes.slice(0, 500),
     auditModes: MODES,
     auditTemplates: TEMPLATES,
+    templateNeeds: TEMPLATE_NEEDS,
+    images: { hasPexelsKey: !!(d.images && d.images.pexelsKey), model: (d.images && d.images.model) || 'gpt-image-1', hasOpenAiKey: !!store.getKey('openai') },
     schedules: d.schedules,
     articles: d.articles.slice(0, 1000),
     activity: d.activity.slice(0, 80),
@@ -246,30 +254,74 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
   jobs.set(jobId, { id: jobId, writerName: writer.name, scheduleName: schedule ? schedule.name : null, startedAt: new Date().toISOString() });
   broadcast();
 
+  const note = (m) => { store.log('info', `${writer.name}: ${m}`); };
   try {
     const recentTitles = d.articles.filter((a) => a.writerId === writer.id).map((a) => a.title);
+    let keyword = null;
+    if (!topic && writer.topicMode === 'research') {
+      jobs.get(jobId).step = 'Researching keywords';
+      broadcast();
+      try {
+        const r = await pipeline.researchTopic(writer);
+        topic = r.topic;
+        keyword = r.keyword;
+        store.log('info', `${writer.name} picked the keyword "${keyword.keyword}"${keyword.volume ? ` (${keyword.volume} searches a month${keyword.difficulty !== null ? `, difficulty ${keyword.difficulty}` : ''})` : ''}. ${keyword.why || ''}`.trim());
+        store.save();
+      } catch (e) {
+        note(`keyword research didn't work (${e.message}), so it used its topics instead.`);
+      }
+    }
+    jobs.get(jobId).step = 'Writing';
+    broadcast();
     const siteContext = await buildSiteContext(writer);
     const article = await generator.run({
-      writer: { ...writer, siteContext }, topicOverride: topic, schedule, settings: d.settings,
+      writer: { ...writer, siteContext, topicMode: writer.topicMode === 'research' ? 'ai' : writer.topicMode }, topicOverride: topic, schedule, settings: d.settings,
       providerCfg: cfg, generate: providers.generate, recentTitles, uid: store.uid
     });
+    if (keyword) article.keyword = keyword;
+    if (writer.qualityCheck || (writer.imageSource && writer.imageSource !== 'none') || (writer.schemaTypes || []).length) {
+      jobs.get(jobId).step = writer.qualityCheck ? 'Checking quality' : 'Finishing';
+      broadcast();
+      await pipeline.afterWrite(writer, article, note);
+    }
     d.articles.unshift(article);
     store.log('article', `${writer.name} wrote "${article.title}" (${article.words} words).`, { articleId: article.id });
     if (article.truncated) store.log('info', `"${article.title}" hit the max output length and may be cut off. Raise "Max output tokens" for ${writer.name}.`);
     store.save();
 
     let publishNote = '';
+    if (article.quality && article.quality.score) publishNote += `\nQuality ${article.quality.score}/10${article.quality.revised ? ' after one revision' : ''}`;
     if (writer.siteId && writer.publishStatus && writer.publishStatus !== 'none') {
+      let status = writer.publishStatus;
+      if (writer.qualityCheck && article.quality && !article.quality.passed && ['publish', 'private'].includes(status)) {
+        status = 'draft';
+        store.log('info', `"${article.title}" was saved as a draft instead of being published, because the quality check ${article.quality.score ? `scored it ${article.quality.score}/10 (minimum ${article.quality.min})` : "couldn't run"}${article.quality.mustFix ? ' and found something that must be fixed' : ''}.`, { articleId: article.id });
+        article.heldForQuality = true;
+      }
       try {
-        const pub = await publishArticle(article.id, writer.siteId, { status: writer.publishStatus, categories: writer.wpCategories, tags: writer.wpTags });
-        publishNote = `\n${pub.status === 'publish' ? 'Published' : pub.status === 'sent' ? 'Sent' : `Saved as ${pub.status}`} on ${pub.siteName}`;
+        jobs.get(jobId).step = 'Publishing';
+        broadcast();
+        const pub = await publishArticle(article.id, writer.siteId, { status, categories: writer.wpCategories, tags: writer.wpTags });
+        publishNote += `\n${pub.status === 'publish' ? 'Published' : pub.status === 'sent' ? 'Sent' : `Saved as ${pub.status}`} on ${pub.siteName}`;
+        const site = d.sites.find((x) => x.id === writer.siteId);
+        if (pub.status === 'publish' && site && site.type === 'wordpress' && writer.linkOlderPosts && writer.linkOlderPosts !== 'off') {
+          jobs.get(jobId).step = 'Linking from older posts';
+          broadcast();
+          try {
+            const r = await pipeline.linkFromOlderPosts(article, site, writer, writer.linkOlderPosts);
+            if (r.applied || r.queued) {
+              store.log('publish', r.applied ? `Added ${r.applied} link${r.applied > 1 ? 's' : ''} to "${article.title}" from older posts on ${site.name}.` : `${r.queued} link${r.queued > 1 ? 's' : ''} from older posts to "${article.title}" ${r.queued > 1 ? 'are' : 'is'} waiting for your approval.`, { articleId: article.id });
+              publishNote += r.applied ? `, ${r.applied} older posts now link to it` : `, ${r.queued} links waiting for approval`;
+            }
+          } catch (e) { note(`couldn't add links from older posts: ${e.message}`); }
+        }
       } catch (e) {
-        publishNote = `\nNot published: ${e.message}`.slice(0, 120);
+        publishNote += `\nNot published: ${e.message}`.slice(0, 120);
       }
     }
 
     if (d.settings.notifyOnComplete && (!schedule || schedule.notifyOnComplete !== false) && !silent) {
-      notify('New article written', `${article.title}\n${writer.name}, ${article.words} words${publishNote}`, () => win?.webContents.send('open-article', article.id));
+      notify('New article written', `${article.title}\n${writer.name}, ${article.words} words${publishNote}`.slice(0, 300), () => win?.webContents.send('open-article', article.id));
     }
     return article;
   } catch (e) {
@@ -285,18 +337,31 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
 
 // Facts about the writer's website: existing posts (to avoid repeats and add internal
 // links) and Search Console queries the site almost ranks for (topic and keyword ideas).
+// Published posts on a WordPress site (id, title, link), cached for 6 hours.
+async function postsFor(site, fresh = false) {
+  if (site.type !== 'wordpress' || !site.secret) return [];
+  let c = siteCache.get(site.id);
+  if (fresh || !c || Date.now() - c.at > 6 * 36e5) {
+    const auth = { user: site.username, pass: store.decrypt(site.secret) };
+    const posts = [];
+    for (let page = 1; page <= 3; page++) {
+      const rows = await sites.wpRequest(site, auth, '/wp/v2/posts', { query: { per_page: 100, page, status: 'publish', _fields: 'id,title,link' } });
+      posts.push(...rows.map((r) => ({ id: r.id, title: String(r.title && (r.title.rendered || r.title.raw) || '').replace(/<[^>]+>/g, '').replace(/&#8217;|&#8216;/g, "'").replace(/&#8220;|&#8221;/g, '"').replace(/&amp;/g, '&').replace(/&#8211;/g, '-'), link: r.link })));
+      if (rows.length < 100) break;
+    }
+    c = { at: Date.now(), posts };
+    siteCache.set(site.id, c);
+  }
+  return c.posts;
+}
+
 async function buildSiteContext(writer) {
   const site = store.data.sites.find((x) => x.id === writer.siteId);
   if (!site) return '';
   const parts = [];
   if (writer.useSitePosts !== false && site.type === 'wordpress' && site.secret) {
     try {
-      let c = siteCache.get(site.id);
-      if (!c || Date.now() - c.at > 6 * 36e5) {
-        const rows = await sites.wpRequest(site, { user: site.username, pass: store.decrypt(site.secret) }, '/wp/v2/posts', { query: { per_page: 100, status: 'publish', _fields: 'title,link' } });
-        c = { at: Date.now(), posts: rows.map((r) => ({ title: String(r.title && (r.title.rendered || r.title.raw) || '').replace(/<[^>]+>/g, '').replace(/&#8217;/g, "'").replace(/&amp;/g, '&'), link: r.link })) };
-        siteCache.set(site.id, c);
-      }
+      const c = { posts: await postsFor(site) };
       if (c.posts.length) {
         parts.push(`Articles already published on ${site.name} (title | URL):\n${c.posts.slice(0, 80).map((p) => `- ${p.title} | ${p.link}`).join('\n')}\n\nDo not write about the same subject as any of these. Where it genuinely helps the reader, link to 2 to 4 of them with descriptive anchor text, as Markdown links, using these exact URLs.`);
       }
@@ -401,10 +466,17 @@ async function publishArticle(articleId, siteId, opts = {}) {
   if (!site) throw new Error('That website is no longer connected.');
   try {
     const text = fs.readFileSync(article.path, 'utf8');
-    const res = await sites.publish(site, siteSecret(site), article, text, opts);
-    article.published = { ...res, siteId: site.id, siteName: site.name, at: new Date().toISOString() };
+    const writer = d.writers.find((w) => w.id === article.writerId);
+    const image = opts.includeImage === false ? null : pipeline.imageFor(article);
+    let schema = null;
+    try { schema = pipeline.schemaFor(writer, article, site); } catch { /* publish without it */ }
+    const res = await sites.publish(site, siteSecret(site), article, text, { ...opts, image, schema });
+    const { notes = [], ...rest } = res;
+    article.published = { ...rest, siteId: site.id, siteName: site.name, at: new Date().toISOString() };
     delete article.publishError;
-    store.log('publish', `"${article.title}" ${res.status === 'publish' ? 'was published' : res.status === 'sent' ? 'was sent' : `was saved as ${res.status}`} on ${site.name}.`, { articleId: article.id });
+    store.log('publish', `"${article.title}" ${res.status === 'publish' ? 'was published' : res.status === 'sent' ? 'was sent' : `was saved as ${res.status}`} on ${site.name}${res.mediaId ? ' with its featured image' : ''}.`, { articleId: article.id });
+    for (const n of notes) store.log('info', `"${article.title}": ${n}`, { articleId: article.id });
+    siteCache.delete(site.id);
     return { ...res, siteName: site.name };
   } catch (e) {
     article.publishError = e.message;
@@ -508,6 +580,7 @@ function registerIpc() {
     for (const id of Object.keys(d.providers)) d.providers[id].key = null;
     d.modelCache = {};
     d.google = { psiKey: null };
+    d.images = { model: (d.images && d.images.model) || 'gpt-image-1' };
     for (const c of d.connectors) {
       delete c.oauthTokens; delete c.oauthClient; delete c.codeVerifier; c.secret = null;
       c.lastError = 'Sign in again. Saved sign-ins were erased when the password was reset.';
@@ -753,9 +826,60 @@ function registerIpc() {
     store.save();
     broadcast();
   });
+  handle('site:setMonitor', (id, cfg = {}) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site) throw new Error('Website not found.');
+    const c = { ...MONITOR_DEFAULTS, ...(site.monitor || {}), ...cfg };
+    c.intervalMin = Math.max(10, Math.min(1440, Number(c.intervalMin) || 30));
+    c.sslDays = Math.max(1, Math.min(60, Number(c.sslDays) || 14));
+    c.dropPct = Math.max(5, Math.min(95, Number(c.dropPct) || 30));
+    c.minClicks = Math.max(0, Number(c.minClicks) || 0);
+    site.monitor = c;
+    store.save();
+    broadcast();
+    if (c.enabled) monitor.checkNow(site).catch(() => {});
+  });
+  handle('site:checkNow', async (id) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site) throw new Error('Website not found.');
+    await monitor.checkNow(site);
+    return monitor.status(id);
+  });
+  handle('site:setClient', (id, clientId) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site) throw new Error('Website not found.');
+    site.clientId = clientId || '';
+    store.save();
+    broadcast();
+  });
+  handle('client:save', (c = {}) => {
+    const d = store.data;
+    d.clients = d.clients || [];
+    if (!String(c.name || '').trim()) throw new Error('Give the client a name.');
+    let client = c.id && d.clients.find((x) => x.id === c.id);
+    if (!client) { client = { id: store.uid(), createdAt: new Date().toISOString() }; d.clients.push(client); }
+    Object.assign(client, { name: String(c.name).trim(), contact: String(c.contact || '').trim(), email: String(c.email || '').trim(), notes: String(c.notes || '') });
+    if (Array.isArray(c.siteIds)) {
+      for (const site of d.sites) {
+        if (c.siteIds.includes(site.id)) site.clientId = client.id;
+        else if (site.clientId === client.id) site.clientId = '';
+      }
+    }
+    store.save();
+    broadcast();
+    return client.id;
+  });
+  handle('client:delete', (id) => {
+    const d = store.data;
+    d.clients = (d.clients || []).filter((x) => x.id !== id);
+    for (const site of d.sites) if (site.clientId === id) site.clientId = '';
+    store.save();
+    broadcast();
+  });
   handle('site:delete', (id) => {
     const d = store.data;
     d.sites = d.sites.filter((x) => x.id !== id);
+    if (d.monitorState) delete d.monitorState[id];
     for (const w of d.writers) if (w.siteId === id) { w.siteId = ''; w.publishStatus = 'none'; }
     store.save();
     broadcast();
@@ -886,6 +1010,32 @@ function registerIpc() {
   });
 
   handle('article:publish', (id, siteId, opts) => publishArticle(id, siteId, opts || {}));
+  handle('article:linkOlder', async (id, mode) => {
+    const d = store.data;
+    const a = d.articles.find((x) => x.id === id);
+    if (!a || !a.published) throw new Error('Publish this article first.');
+    const site = d.sites.find((x) => x.id === a.published.siteId);
+    if (!site) throw new Error('That website is no longer connected.');
+    const writer = d.writers.find((w) => w.id === a.writerId) || { provider: Object.keys(d.providers).find((p) => store.getKey(p)) || 'chatgpt', model: '' };
+    try {
+      if (a.published.status !== 'publish' && site.type === 'wordpress') {
+        // It may have been published in WordPress since: check its current status.
+        const post = await sites.wpRequest(site, { user: site.username, pass: siteSecret(site) }, `/wp/v2/posts/${a.published.remoteId}`, { query: { context: 'edit', _fields: 'status,link' } });
+        if (post.status === 'publish') Object.assign(a.published, { status: 'publish', url: post.link });
+      }
+      const r = await pipeline.linkFromOlderPosts(a, site, writer, mode === 'auto' ? 'auto' : 'approve');
+      store.log('publish', r.applied ? `Added ${r.applied} link${r.applied > 1 ? 's' : ''} to "${a.title}" from older posts.` : r.queued ? `${r.queued} link${r.queued > 1 ? 's' : ''} to "${a.title}" from older posts ${r.queued > 1 ? 'are' : 'is'} waiting for your approval.` : `No older posts on ${site.name} were a good fit to link to "${a.title}".`, { articleId: a.id });
+      return r;
+    } finally { store.save(); broadcast(); }
+  });
+  handle('images:set', (cfg = {}) => {
+    const d = store.data;
+    d.images = d.images || {};
+    if ('pexelsKey' in cfg) d.images.pexelsKey = cfg.pexelsKey ? store.encrypt(String(cfg.pexelsKey).trim()) : null;
+    if ('model' in cfg) d.images.model = String(cfg.model || '').trim() || 'gpt-image-1';
+    store.save();
+    broadcast();
+  });
 }
 
 // ---------------- app lifecycle ----------------
@@ -923,12 +1073,19 @@ if (gotLock) {
         gateway: () => path.join(__dirname, 'gateway.js').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`)
       }
     });
+    pipeline = createPipeline({ store, providers, builtins, auditor, providerConfig, postsFor });
+    monitor = createMonitor({
+      store, google, guard: hostGuard, onChange: broadcast,
+      notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
+      runAudit: (job, context) => auditor.runJob(job, { context })
+    });
     scheduler = createScheduler({ store, runSchedule, notify, onChange: broadcast });
     registerIpc();
     createWindow(!startHidden);
     createTray();
     applySettings({ __init: true, launchAtLogin: store.data.settings.launchAtLogin });
     scheduler.start();
+    monitor.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }
     repairCodexIfNeeded();
     // Check ChatGPT sign-in in the background if it has been used before

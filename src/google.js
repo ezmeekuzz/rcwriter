@@ -261,6 +261,47 @@ function createGoogle({ store, openExternal }) {
     };
   }
 
+  // Two equal periods back to back (data lags about 2 days), per page or query.
+  async function gscCompare(siteUrl, { dimension = 'page', days = 28, minClicks = 10, limit = 20 } = {}) {
+    const n = Math.max(3, Math.min(90, Number(days) || 28));
+    const end = new Date(Date.now() - 2 * 864e5);
+    const midEnd = new Date(end.getTime() - n * 864e5);
+    const d = dimension === 'query' ? 'query' : 'page';
+    const [now, before] = await Promise.all([
+      gscPerformance(siteUrl, { dimensions: [d], rowLimit: 1000, startDate: iso(new Date(end.getTime() - (n - 1) * 864e5)), endDate: iso(end) }),
+      gscPerformance(siteUrl, { dimensions: [d], rowLimit: 1000, startDate: iso(new Date(midEnd.getTime() - (n - 1) * 864e5)), endDate: iso(midEnd) })
+    ]);
+    const map = new Map();
+    for (const r of before.rows) map.set(r.keys[0], { key: r.keys[0], clicksBefore: r.clicks, clicksNow: 0, impressionsBefore: r.impressions, impressionsNow: 0, positionBefore: r.position, positionNow: null });
+    for (const r of now.rows) {
+      const o = map.get(r.keys[0]) || { key: r.keys[0], clicksBefore: 0, impressionsBefore: 0, positionBefore: null };
+      Object.assign(o, { clicksNow: r.clicks, impressionsNow: r.impressions, positionNow: r.position });
+      map.set(r.keys[0], o);
+    }
+    const rows = [...map.values()].map((o) => ({ ...o, clicksChange: o.clicksNow - o.clicksBefore, clicksChangePct: o.clicksBefore ? Math.round(((o.clicksNow - o.clicksBefore) / o.clicksBefore) * 100) : null }));
+    const lim = Math.max(1, Math.min(100, Number(limit) || 20));
+    const min = Number(minClicks) >= 0 ? Number(minClicks) : 10;
+    const sum = (k) => rows.reduce((t, r) => t + (r[k] || 0), 0);
+    return {
+      dimension: d,
+      periodNow: { start: now.startDate, end: now.endDate }, periodBefore: { start: before.startDate, end: before.endDate },
+      totals: { clicksNow: sum('clicksNow'), clicksBefore: sum('clicksBefore'), impressionsNow: sum('impressionsNow'), impressionsBefore: sum('impressionsBefore') },
+      biggestLosers: rows.filter((r) => r.clicksBefore >= min && r.clicksChange < 0).sort((a, b) => a.clicksChange - b.clicksChange).slice(0, lim),
+      biggestGainers: rows.filter((r) => r.clicksChange > 0).sort((a, b) => b.clicksChange - a.clicksChange).slice(0, lim)
+    };
+  }
+
+  // Daily clicks for the last 2 x N days, summed per period (for traffic-drop alerts).
+  async function gscTotals(siteUrl, days = 7) {
+    const n = Math.max(1, Number(days) || 7);
+    const end = new Date(Date.now() - 2 * 864e5);
+    const r = await gscPerformance(siteUrl, { dimensions: ['date'], rowLimit: 1000, startDate: iso(new Date(end.getTime() - (2 * n - 1) * 864e5)), endDate: iso(end) });
+    const split = iso(new Date(end.getTime() - (n - 1) * 864e5));
+    let now = 0, before = 0;
+    for (const row of r.rows) { if (row.keys[0] >= split) now += row.clicks; else before += row.clicks; }
+    return { clicksNow: now, clicksBefore: before, days: n, endDate: r.endDate };
+  }
+
   // Search queries the site already shows up for, ranked as article ideas.
   async function opportunityQueries(siteUrl, limit = 40) {
     const r = await gscPerformance(siteUrl, { dimensions: ['query'], rowLimit: 1000 });
@@ -278,7 +319,7 @@ function createGoogle({ store, openExternal }) {
   function setPsiKey(key) { cfg().psiKey = key ? store.encrypt(String(key).trim()) : null; store.save(); }
 
   return { EP, SCOPES, configured, status, useServiceAccount, signInOAuth, disconnect, refreshLists, setPsiKey,
-    gscPerformance, gscInspect, gscSitemaps, ga4Report, gtmLive, pagespeed, opportunityQueries, _resetCache: () => { cached = null; } };
+    gscPerformance, gscCompare, gscTotals, gscInspect, gscSitemaps, ga4Report, gtmLive, pagespeed, opportunityQueries, _resetCache: () => { cached = null; } };
 }
 
 module.exports = { createGoogle, SCOPES };

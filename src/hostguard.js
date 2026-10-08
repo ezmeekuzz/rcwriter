@@ -147,6 +147,7 @@ function inQueue(host, fn) {
  *  'audit'   - site audits: pace, cache, daily limit, refuses while paused
  *  'connect' - the user clicked connect/test: pace only, always tries
  *  'publish' - writers publishing or reading posts: pace, refuses while paused
+ *  'monitor' - uptime checks: pace, refuses while paused, not counted as audit requests
  */
 async function guardedFetch(url, init = {}, { purpose = 'audit', cacheable = false } = {}) {
   const host = hostOf(url);
