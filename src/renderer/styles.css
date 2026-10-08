@@ -1,4 +1,11 @@
 /* RCWriter: ink on cool paper, with a marigold "clock" accent reserved for time and reminders. */
+
+/* Jura (SIL Open Font License) is bundled in assets/fonts so it works offline. */
+@font-face { font-family: "Jura"; font-style: normal; font-weight: 400; font-display: swap; src: url("../../assets/fonts/jura-400.woff2") format("woff2"); }
+@font-face { font-family: "Jura"; font-style: normal; font-weight: 500; font-display: swap; src: url("../../assets/fonts/jura-500.woff2") format("woff2"); }
+@font-face { font-family: "Jura"; font-style: normal; font-weight: 600; font-display: swap; src: url("../../assets/fonts/jura-600.woff2") format("woff2"); }
+@font-face { font-family: "Jura"; font-style: normal; font-weight: 700; font-display: swap; src: url("../../assets/fonts/jura-700.woff2") format("woff2"); }
+
 :root {
   --paper: #EEF1F4;
   --surface: #FFFFFF;
@@ -16,7 +23,8 @@
   --focus: #2F3C9E;
   --radius-s: 6px;
   --radius-m: 10px;
-  --ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --ui: "Jura", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --display: "Jura", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --read: Charter, "Bitstream Charter", "Iowan Old Style", "Sitka Text", Cambria, Georgia, serif;
   color-scheme: light;
 }
@@ -44,7 +52,7 @@ body {
 
 /* Sidebar */
 .sidebar { display: flex; flex-direction: column; padding: 18px 12px; border-right: 1px solid var(--line); background: var(--surface-2); }
-.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 22px; font: 600 17px/1 var(--read); letter-spacing: .01em; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 22px; font: 600 17px/1 var(--display); letter-spacing: .01em; }
 .brand img { border-radius: 7px; }
 #nav { display: flex; flex-direction: column; gap: 2px; }
 #nav button {
@@ -63,7 +71,7 @@ body {
 main { overflow-y: auto; padding: 32px 40px 60px; }
 main:focus { outline: none; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-h1 { font: 600 28px/1.15 var(--read); margin: 0; letter-spacing: -.01em; }
+h1 { font: 600 28px/1.15 var(--display); margin: 0; letter-spacing: -.01em; }
 h2 { font-size: 15px; font-weight: 600; margin: 32px 0 10px; }
 .sub { color: var(--ink-soft); margin: 6px 0 0; max-width: 64ch; }
 .muted { color: var(--ink-soft); }
@@ -111,7 +119,7 @@ h2 { font-size: 15px; font-weight: 600; margin: 32px 0 10px; }
 /* The day clock: the one bold element */
 .clock { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 22px 22px 14px; }
 .clock-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 18px; }
-.next-big { font: 600 40px/1 var(--read); letter-spacing: -.02em; }
+.next-big { font: 600 40px/1 var(--display); letter-spacing: -.02em; }
 .next-label { color: var(--ink-soft); margin-top: 6px; }
 .track { position: relative; height: 92px; margin: 0 6px; }
 .track .rail { position: absolute; left: 0; right: 0; top: 40px; height: 2px; background: var(--line); }
@@ -188,7 +196,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--f
 .files { list-style: none; padding: 0; margin: 6px 0 0; }
 .files li { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; padding: 4px 0; color: var(--ink-soft); word-break: break-all; }
 fieldset { border: 0; padding: 0; margin: 0 0 6px; }
-legend { font: 600 16px/1.3 var(--read); padding: 0; margin: 18px 0 12px; }
+legend { font: 600 16px/1.3 var(--display); padding: 0; margin: 18px 0 12px; }
 
 /* Panels (settings, providers) */
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 20px 22px; margin-bottom: 16px; max-width: 760px; }
@@ -202,7 +210,7 @@ legend { font: 600 16px/1.3 var(--read); padding: 0; margin: 18px 0 12px; }
 .modal { background: var(--surface); border-radius: 12px; width: min(760px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; box-shadow: 0 24px 60px rgb(0 0 0 / .3); }
 .modal.small { width: min(460px, 100%); }
 .modal header { padding: 20px 24px 6px; }
-.modal header h2 { margin: 0; font: 600 21px/1.25 var(--read); }
+.modal header h2 { margin: 0; font: 600 21px/1.25 var(--display); }
 .modal .body { padding: 10px 24px 8px; overflow-y: auto; }
 .modal footer { padding: 14px 24px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
 .preview { font-size: 13px; color: var(--ink-soft); }
