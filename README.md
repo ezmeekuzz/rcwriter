@@ -43,6 +43,16 @@ Each writer can now do more around every article, under **Before publishing** an
 - **New audit starting points:** refresh posts that are losing traffic, competitor watch, AI search visibility (Ahrefs Brand Radar), and lost backlinks with ready-to-send reclaim emails. Every audit now sees its previous report, so it can say what changed.
 - **New built-in tools:** `gsc_compare_periods` (Search Console losers and gainers between two periods) and `wp_add_internal_link` (adds one link around an existing phrase, with undo).
 
+## Reports, tasks and email (1.7)
+
+- **Monthly client SEO reports in Word and PDF** (Workspace → Client reports, or automatically on a day you choose for each client): an executive summary, key results against the previous month (Search Console clicks, impressions, CTR, average position; GA4 sessions, users, engagement and key events, with % change), achievements, work completed (articles, fixes, audits, tasks), search highlights, things to watch and next month's plan. Saved in `Documents\RCWriter\Reports\<client>`.
+- **Audit reports in Word and PDF:** any audit report can be saved as Word/PDF, or automatically after every run. A new **Priority findings & dev report** format gives a priority table (Priority, Finding, Evidence, Action, Status) and DONE / IN PROGRESS / TO DO lists.
+- **Tasks** (Workspace → Tasks): to-do items from audit reports, requests found in client emails, and your own tasks, with priorities, due dates and one-click **Draft reply** for email tasks.
+- **Daily digest:** every morning, a summary of what was written, audited, fixed and broken, approvals waiting and tasks due. Shown on Today, and optionally emailed to you.
+- **Gmail** (Settings → Gmail and Google Business Profile, signed in with your own Google Cloud OAuth client): new emails from each client's addresses become tasks; reply drafts and weekly client update drafts are saved in Gmail for you to review and send. RCWriter never sends email to clients by itself.
+- **Google Business Profile:** link a location to a website to draft replies to new reviews (good reviews can be answered automatically, the rest wait for approval) and to draft a Google post whenever a new article goes live. Google gives these APIs no quota until it approves your project's access request.
+- **Assistant AI** (Settings): the model that writes reports, emails, review replies and posts.
+
 **Writers use site data:** with a WordPress site selected, a writer reads the site's published posts so it doesn't repeat them and links to related ones. With Search Console linked, it aims articles at searches the site already appears for but isn't in the top 3 for yet.
 
 ## Site audits
@@ -163,6 +173,9 @@ src/hostguard.js   Paces, caches and pauses all direct requests to websites
 src/pipeline.js    Keyword research, quality check, images, schema and links around each article
 src/enhance.js     Editor check, image, schema and internal-link helpers
 src/monitor.js     Uptime, SSL and traffic-drop monitoring
+src/reports.js     Word and PDF reports
+src/automation.js  Tasks, daily digest, Gmail and Business Profile automations
+src/googleuser.js  Your Google account: Gmail and Business Profile
 src/lock.js        App password
 src/codex-install.js  One-click Codex download
 build/installer.nsh   Installer password page
@@ -173,6 +186,4 @@ src/renderer/      The interface (HTML, CSS, JS)
 
 ## Ideas for next steps
 
-- Monthly client SEO reports and audit reports as Word and PDF files.
-- Gmail sign-in for client emails, tasks and weekly update drafts.
 - Social posts through Buffer and webhooks, and a monthly newsletter draft.

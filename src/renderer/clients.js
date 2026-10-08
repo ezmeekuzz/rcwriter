@@ -83,6 +83,7 @@ function viewClients() {
         </div>
         <div class="btn-row">
           <button class="btn" data-action="client-filter" data-id="${c.id}">Show only this client</button>
+          ${S.googleUser && S.googleUser.gmail && c.email ? `<button class="btn ghost" data-action="client-weekly" data-id="${c.id}">Weekly update draft</button>` : ''}
           <button class="btn ghost" data-action="client-edit" data-id="${c.id}">Edit</button>
           <button class="btn ghost danger" data-action="client-delete" data-id="${c.id}">Delete</button>
         </div>
@@ -108,11 +109,21 @@ function openClientModal(c) {
         <div class="field"><label for="cl-name">Name</label><input type="text" id="cl-name" value="${esc(d.name)}" placeholder="Eco Pro Properties"></div>
         <div class="grid-2">
           <div class="field"><label for="cl-contact">Contact person</label><input type="text" id="cl-contact" value="${esc(d.contact)}"></div>
-          <div class="field"><label for="cl-email">Email</label><input type="email" id="cl-email" value="${esc(d.email)}"></div>
+          <div class="field"><label for="cl-email">Email addresses</label><input type="text" id="cl-email" value="${esc(d.email)}" placeholder="dan@ecopro.co.uk, office@ecopro.co.uk"></div>
         </div>
         <div class="field"><span class="label">Websites</span>
           <div class="checks col">${S.sites.map((x) => `<label class="check"><input type="checkbox" name="cl-site" value="${x.id}" ${c && x.clientId === c.id ? 'checked' : ''}><span>${esc(x.name)} <span class="muted small">${esc(x.url)}${x.clientId && (!c || x.clientId !== c.id) && S.clients.find((k) => k.id === x.clientId) ? `, now with ${esc(S.clients.find((k) => k.id === x.clientId).name)}` : ''}</span></span></label>`).join('') || '<span class="muted small">Add websites first.</span>'}</div></div>
-        <div class="field"><label for="cl-notes">Notes</label><textarea id="cl-notes" placeholder="Reporting day, goals, things never to change…">${esc(d.notes)}</textarea></div>
+        <div class="field"><label for="cl-notes">Notes</label><textarea id="cl-notes" placeholder="Reporting day, goals, things never to change…">${esc(d.notes)}</textarea><span class="hint">The AI reads these when it writes reports and emails for this client.</span></div>
+        <fieldset><legend>Automations</legend>
+          <label class="check"><input type="checkbox" id="cl-mr" ${d.monthlyReport && d.monthlyReport.enabled ? 'checked' : ''}><span><strong>Monthly SEO report</strong> (Word and PDF, saved on this computer)</span></label>
+          <div class="grid-2" style="margin-left:26px"><div class="field"><label for="cl-mr-day">On day of the month</label><input type="number" id="cl-mr-day" min="1" max="28" value="${esc((d.monthlyReport && d.monthlyReport.day) || 1)}"></div>
+            <div class="field"><label for="cl-mr-time">At</label><input type="time" id="cl-mr-time" value="${esc((d.monthlyReport && d.monthlyReport.time) || '09:00')}"></div></div>
+          <label class="check"><input type="checkbox" id="cl-wu" ${d.weeklyUpdate && d.weeklyUpdate.enabled ? 'checked' : ''}><span><strong>Weekly update email</strong> (saved as a Gmail draft for you to send)</span></label>
+          <div class="grid-2" style="margin-left:26px"><div class="field"><label for="cl-wu-day">Day</label><select id="cl-wu-day">${[1, 2, 3, 4, 5, 6, 0].map((i) => `<option value="${i}" ${Number((d.weeklyUpdate && d.weeklyUpdate.day) ?? 5) === i ? 'selected' : ''}>${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][i]}</option>`).join('')}</select></div>
+            <div class="field"><label for="cl-wu-time">At</label><input type="time" id="cl-wu-time" value="${esc((d.weeklyUpdate && d.weeklyUpdate.time) || '16:00')}"></div></div>
+          <label class="check"><input type="checkbox" id="cl-et" ${d.emailTasks !== false ? 'checked' : ''}><span><strong>Turn this client's emails into tasks</strong> (from the email addresses above)</span></label>
+          ${S.googleUser && S.googleUser.gmail ? '' : '<p class="hint">Emails need Gmail connected in Settings.</p>'}
+        </fieldset>
       </div>
       <footer><span></span><div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="client-save">${c ? 'Save' : 'Add client'}</button></div></footer>
     </div></div>`;
@@ -191,7 +202,10 @@ Object.assign(ACTIONS, {
     const v = (id) => modalRoot.querySelector(id).value;
     const siteIds = [...modalRoot.querySelectorAll('[name=cl-site]:checked')].map((x) => x.value);
     try {
-      await api.saveClient({ id: modal.id, name: v('#cl-name'), contact: v('#cl-contact'), email: v('#cl-email'), notes: v('#cl-notes'), siteIds });
+      const q = (id) => modalRoot.querySelector(id);
+      await api.saveClient({ id: modal.id, name: v('#cl-name'), contact: v('#cl-contact'), email: v('#cl-email'), notes: v('#cl-notes'), siteIds,
+        monthlyReport: { enabled: q('#cl-mr').checked, day: Number(v('#cl-mr-day')) || 1, time: v('#cl-mr-time') || '09:00' },
+        weeklyUpdate: { enabled: q('#cl-wu').checked, day: Number(v('#cl-wu-day')), time: v('#cl-wu-time') || '16:00' }, emailTasks: q('#cl-et').checked });
       toast(modal.id ? 'Client saved' : 'Client added');
       closeModal();
     } catch (e) { toast(cleanErr(e), 'error'); }

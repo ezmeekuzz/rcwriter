@@ -308,3 +308,16 @@ figure.feature { margin: 0 0 20px; }
 figure.feature img { width: 100%; max-height: 360px; object-fit: cover; border-radius: var(--radius-m); display: block; }
 figure.feature figcaption { margin-top: 6px; font: 12.5px/1.4 var(--ui); color: var(--ink-soft); }
 .client-banner a { color: var(--action); }
+
+/* 1.7: tasks, reports, digest */
+.task-row { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start; }
+.task-row > input { margin-top: 4px; width: 16px; height: 16px; }
+.task-row.done .title { text-decoration: line-through; color: var(--ink-soft); }
+.chip.pr-high { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.chip.pr-low { opacity: .75; }
+.report-make { display: grid; gap: 8px; margin-bottom: 8px; }
+.report-make > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.panel.digest summary { cursor: pointer; }
+.digest-body { margin: 8px 0; font-size: 13.5px; }
+.digest-body h2 { font-size: 14px; margin: 12px 0 4px; }
+.digest-body ul { margin: 0; padding-left: 18px; }

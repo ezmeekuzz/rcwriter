@@ -36,7 +36,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const toml = (s) => JSON.stringify(String(s));
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n)}\n[…truncated ${s.length - n} characters]` : s; };
 
-function createAuditor({ store, connectors, builtins, providers, codex, codexCmd, codexProblem = () => null, notify, onChange, paths }) {
+function createAuditor({ store, connectors, builtins, providers, codex, codexCmd, codexProblem = () => null, notify, onChange, paths, afterRun = null }) {
   const runs = new Map(); // runId -> live run
   let bridgeServer = null;
   let bridgeUrl = null;
@@ -250,14 +250,25 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
         const st = job.siteUrl ? guard.hostStatus(guard.hostOf(/^https?:/.test(job.siteUrl) ? job.siteUrl : `https://${job.siteUrl}`)) : null;
         return st && st.pausedUntil ? `## Note\nDirect requests from this computer to ${job.siteUrl} are paused until ${new Date(st.pausedUntil).toISOString()} because the host's bot protection (${st.provider}) recently challenged them. Don't use the Website checker or WordPress tools for this site in this run. Use the other sources, and list the checks that need direct access under "Recommended fixes".` : '';
       })(),
-      [
+      job.reportStyle === 'priority' ? [
+        '## Final answer',
+        'Finish with a report in Markdown in this exact structure:',
+        '# Site audit: <site>',
+        '## Summary  (3 to 5 sentences: overall health, the biggest problems, what was fixed)',
+        '## Priority findings & actions  (a Markdown table with columns: Priority | Finding | Evidence | Action | Status. Priority is High, Medium or Low. Status is DONE, WAITING FOR APPROVAL or TO DO. Most important first.)',
+        '## Dev report',
+        '### DONE  (bullet list of what you changed, with the page or item)',
+        '### IN PROGRESS / WAITING FOR APPROVAL  (bullet list, or "None")',
+        '### TO DO  (bullet list of what a developer or the owner must do, most important first, each specific enough to act on)',
+        'Return only the report.'
+      ].join('\n') : [
         '## Final answer',
         'Finish with a report in Markdown, written for a busy site owner, with these sections:',
         '# Site audit: <site>  (one short summary paragraph under it)',
         '## Issues found  (most important first, each with why it matters)',
         '## Changes made  (what you changed, or "None")',
         '## Waiting for your approval  (or "None")',
-        '## Recommended fixes  (what the owner should do next)',
+        '## Recommended fixes  (what the owner should do next, one specific action per bullet)',
         'Return only the report.'
       ].join('\n')
     ].filter(Boolean).join('\n\n');
@@ -445,6 +456,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       rec.reportPath = saveReport(run, text);
       rec.summary = text.replace(/^#.*$/m, '').trim().split('\n').find((l) => l.trim()) || '';
       rec.status = run.stopped ? 'stopped' : 'done';
+      if (afterRun && rec.status === 'done') { try { await afterRun(job, rec, text); } catch (e) { run.notes.push(`After the audit: ${e.message}`); } }
     } catch (e) {
       rec.status = run.stopped ? 'stopped' : 'failed';
       rec.error = e.message;

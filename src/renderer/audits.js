@@ -158,7 +158,7 @@ async function loadAuditReport() {
   const r = S.auditRuns.find((x) => x.id === selectedRunId);
   if (!r) return;
   const bar = `<div class="reader-bar"><div class="muted small">${modeChip(r.mode)} ${esc(PROVIDER_SHORT[r.provider] || r.provider)}${r.model ? `: ${esc(r.model)}` : ''} · ${r.toolCalls} tool calls · ${r.applied} changed · ${r.queued} for approval${r.failed ? ` · ${r.failed} failed` : ''}</div>
-    <div class="btn-row">${r.queued ? '<button class="btn primary" data-action="audit-tab" data-tab="approvals">Review approvals</button>' : ''}<button class="btn ghost" data-action="audit-reveal" data-id="${r.id}">Show in folder</button></div></div>`;
+    <div class="btn-row">${r.queued ? '<button class="btn primary" data-action="audit-tab" data-tab="approvals">Review approvals</button>' : ''}<button class="btn" data-action="audit-export" data-id="${r.id}">Save as Word/PDF</button><button class="btn ghost" data-action="audit-reveal" data-id="${r.id}">Show in folder</button></div></div>`;
   try {
     const text = await api.readAuditReport(r.id);
     if (selectedRunId !== r.id) return;
@@ -341,6 +341,15 @@ function renderAuditModal() {
             <span class="inline" style="width:auto"><input type="number" min="1" value="20" style="width:76px" id="a-rem-amt" aria-label="Reminder amount"><select style="width:auto" id="a-rem-unit" aria-label="Reminder unit"><option value="1">minutes</option><option value="60">hours</option><option value="1440">days</option></select><button class="btn" data-action="audit-rem-add">Add reminder</button></span></div>
           </div>` : ''}
           <label class="check"><input type="checkbox" name="notifyOnComplete" ${d.notifyOnComplete !== false ? 'checked' : ''}><span>Notify me when each audit finishes</span></label>
+          <div class="grid-2" style="margin-top:10px">
+            <div class="field"><label for="a-style">Report format</label><select id="a-style" name="reportStyle">
+              <option value="standard" ${d.reportStyle !== 'priority' ? 'selected' : ''}>Standard</option>
+              <option value="priority" ${d.reportStyle === 'priority' ? 'selected' : ''}>Priority findings &amp; dev report</option></select></div>
+            <div class="field"><span class="label">Also save the report as</span><div class="checks">
+              <label class="check"><input type="checkbox" name="exportFmt" value="docx" ${(d.exportFormats || []).includes('docx') ? 'checked' : ''}><span>Word</span></label>
+              <label class="check"><input type="checkbox" name="exportFmt" value="pdf" ${(d.exportFormats || []).includes('pdf') ? 'checked' : ''}><span>PDF</span></label></div></div>
+          </div>
+          <label class="check"><input type="checkbox" name="createTasks" ${d.createTasks !== false ? 'checked' : ''}><span>Add the report's to-do items to Tasks</span></label>
           <div class="field" style="margin-top:10px"><label for="a-then">When it finishes, run</label><select id="a-then" name="thenJobId">
             <option value="">Nothing else</option>${S.auditJobs.filter((j) => j.id !== d.id).map((j) => `<option value="${j.id}" ${d.thenJobId === j.id ? 'selected' : ''}>${esc(j.name)}</option>`).join('')}</select>
             <span class="hint">Chains audits into a workflow: the next audit starts with this one's report, for example a technical audit followed by a content refresh.</span></div>
@@ -360,7 +369,8 @@ function readAuditForm() {
   const q = (sel) => modalRoot.querySelector(sel);
   const sid = q('[name="siteId"]'); if (sid) d.siteId = sid.value;
   if (modalRoot.querySelector('[name=builtin]')) d.builtins = [...modalRoot.querySelectorAll('[name=builtin]:checked')].map((el) => el.value);
-  for (const n of ['name', 'siteUrl', 'instructions', 'provider', 'model', 'template', 'maxToolCalls', 'maxChanges', 'maxMinutes', 'thenJobId']) { const el = q(`[name="${n}"]`); if (el) d[n] = el.value; }
+  if (q('[name=reportStyle]')) { d.exportFormats = [...modalRoot.querySelectorAll('[name=exportFmt]:checked')].map((el) => el.value); d.createTasks = q('[name=createTasks]').checked; }
+  for (const n of ['name', 'siteUrl', 'instructions', 'provider', 'model', 'template', 'maxToolCalls', 'maxChanges', 'maxMinutes', 'thenJobId', 'reportStyle']) { const el = q(`[name="${n}"]`); if (el) d[n] = el.value; }
   d.connectorIds = [...modalRoot.querySelectorAll('[name=conn]:checked')].map((el) => el.value);
   const mode = q('[name=mode]:checked'); if (mode) d.mode = mode.value;
   const ack = q('[name=fullAck]'); d.fullAck = ack ? ack.checked : d.fullAck;

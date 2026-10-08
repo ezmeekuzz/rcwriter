@@ -101,7 +101,7 @@ async function pool(items, n, fn) {
   return out;
 }
 
-function createBuiltins({ store, google }) {
+function createBuiltins({ store, google, guser = null }) {
   const site = (id) => store.data.sites.find((s) => s.id === id);
   const wpAuth = (s) => ({ user: s.username, pass: store.decrypt(s.secret) });
   const wp = (s, route, opts = {}) => sitesLib.wpRequest(s, wpAuth(s), route, { ...opts, purpose: 'audit' });
@@ -326,6 +326,25 @@ function createBuiltins({ store, google }) {
     return out;
   }
 
+  // ---------- Google Business Profile ----------
+  function gbpTools(s) {
+    const loc = s.gbp.location;
+    return [
+      T('gbp_list_reviews', `Recent Google reviews of ${s.gbp.title || s.name}, with rating, text and whether they have a reply.`, {}, [], 'read', async () => json(await guser.gbpReviews(loc))),
+      T('gbp_reply_review', 'Post a public reply to a Google review. Be gracious, specific and brief; never argue, admit liability or share private details.',
+        { reviewName: { type: 'string', description: 'The review\'s name from gbp_list_reviews' }, comment: { type: 'string' } }, ['reviewName', 'comment'], 'approval', async ({ reviewName, comment }) => {
+          const before = ((await guser.gbpReviews(loc)).find((r) => r.name === reviewName) || {}).reply || '';
+          await guser.gbpReply(reviewName, comment);
+          return { text: 'Reply posted on Google.', before };
+        }, { undo: async ({ reviewName }, before) => { if (before) await guser.gbpReply(reviewName, before); else await guser.gbpDeleteReply(reviewName); return before ? 'Restored the earlier reply.' : 'Removed the reply.'; } }),
+      T('gbp_create_post', 'Publish an update post on the Google Business Profile, with an optional "Learn more" link and photo URL.',
+        { summary: { type: 'string', description: 'Up to 1500 characters' }, url: { type: 'string' }, imageUrl: { type: 'string' } }, ['summary'], 'approval', async (a) => {
+          const r = await guser.gbpPost(loc, a);
+          return { text: `Posted on Google Business Profile${r.searchUrl ? `: ${r.searchUrl}` : '.'}`, before: r.name || '' };
+        }, { undo: async (_a, before) => { if (!before) throw new Error('The post name was not recorded.'); await guser.gbpDeletePost(before); return 'Deleted the post.'; } })
+    ];
+  }
+
   // ---------- public ----------
   function sources(job) {
     const s = job.siteId ? site(job.siteId) : null;
@@ -334,6 +353,7 @@ function createBuiltins({ store, google }) {
     if (base) out.push({ id: `web:${s ? s.id : base}`, kind: 'web', name: 'Website checker', tools: () => webTools(base) });
     if (s && s.type === 'wordpress' && s.secret) out.push({ id: `wp:${s.id}`, kind: 'wp', name: `WordPress (${s.name})`, tools: () => wpTools(s) });
     if (s && s.google && (s.google.gscSite || s.google.ga4Property || s.google.gtmContainer) && google.configured()) out.push({ id: `google:${s.id}`, kind: 'google', name: 'Google data', tools: () => googleTools(s) });
+    if (s && s.gbp && s.gbp.location && guser && guser.has('gbp')) out.push({ id: `gbp:${s.id}`, kind: 'gbp', name: 'Google Business Profile', tools: () => gbpTools(s) });
     return out;
   }
 
@@ -349,6 +369,7 @@ function createBuiltins({ store, google }) {
     if (kind === 'web') tools = webTools(s ? s.url : key);
     else if (kind === 'wp' && s) tools = wpTools(s);
     else if (kind === 'google' && s) tools = googleTools(s);
+    else if (kind === 'gbp' && s && s.gbp && guser) tools = gbpTools(s);
     return tools.find((t) => t.name === toolName) || null;
   }
 

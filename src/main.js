@@ -15,6 +15,10 @@ const { PRESETS, createConnectors } = require('./connectors');
 const { createAuditor, MODES, TEMPLATES, TEMPLATE_NEEDS } = require('./audit');
 const { createPipeline } = require('./pipeline');
 const { createMonitor, DEFAULTS: MONITOR_DEFAULTS } = require('./monitor');
+const { createGoogleUser } = require('./googleuser');
+const { createReports } = require('./reports');
+const { createAutomation } = require('./automation');
+const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
 const hostGuard = require('./hostguard');
@@ -37,6 +41,9 @@ let google = null;
 let builtins = null;
 let pipeline = null;
 let monitor = null;
+let guser = null;
+let reports = null;
+let automation = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
 let locked = false;
@@ -180,6 +187,11 @@ function publicState() {
     sites: d.sites.map(({ secret, ...rest }) => ({ ...rest, hasSecret: !!secret, pace: rest.pace || 'gentle', access: hostGuard.hostStatus(hostGuard.hostOf(rest.url)),
       monitor: { ...MONITOR_DEFAULTS, ...(rest.monitor || {}) }, health: monitor ? monitor.status(rest.id) : null })),
     clients: d.clients || [],
+    tasks: (d.tasks || []).slice(0, 1000),
+    digests: (d.digests || []).slice(0, 7),
+    reports: (d.reports || []).slice(0, 200),
+    googleUser: guser ? guser.status() : { connected: false },
+    assistantAi: assistantChoice(),
     paces: Object.fromEntries(Object.entries(hostGuard.PACES).map(([k, v]) => [k, { label: v.label, gapMs: v.gapMs, auditPerDay: v.auditPerDay }])),
     connectors: d.connectors.map(({ secret, oauthTokens, oauthClient, codeVerifier, oauthState, ...rest }) => ({ ...rest, hasSecret: !!secret, signedIn: rest.auth === 'oauth' ? !!oauthTokens : rest.auth === 'apikey' ? !!secret : true })),
     connectorPresets: PRESETS,
@@ -227,6 +239,37 @@ function applySettings(patch) {
   delete s.__init;
   store.save();
   broadcast();
+}
+
+// ---------------- assistant AI and PDF ----------------
+
+// The model used for reports, emails and other admin writing (Settings, Assistant AI).
+function assistantChoice() {
+  const d = store.data;
+  const a = d.settings.assistant || {};
+  if (a.provider) return { provider: a.provider, model: a.model || '' };
+  if (d.subscription.chatgpt && d.subscription.chatgpt.loggedIn) return { provider: 'chatgpt', model: '' };
+  const w = d.writers.find((x) => x.provider && (x.provider === 'chatgpt' || store.getKey(x.provider)));
+  if (w) return { provider: w.provider, model: w.model || '' };
+  return { provider: 'chatgpt', model: '' };
+}
+
+function assistantAi(o) {
+  const c = assistantChoice();
+  return providers.generate(c.provider, { ...providerConfig(c.provider), model: c.model, system: o.system, prompt: o.prompt, maxTokens: o.maxTokens || 3000, temperature: null });
+}
+
+async function htmlToPdf(html) {
+  const file = path.join(os.tmpdir(), `rcwriter-${store.uid()}.html`);
+  fs.writeFileSync(file, html, 'utf8');
+  const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+  try {
+    await w.loadFile(file);
+    return await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, pageSize: 'A4' });
+  } finally {
+    w.destroy();
+    fs.rmSync(file, { force: true });
+  }
 }
 
 // ---------------- running writers ----------------
@@ -304,6 +347,11 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
         const pub = await publishArticle(article.id, writer.siteId, { status, categories: writer.wpCategories, tags: writer.wpTags });
         publishNote += `\n${pub.status === 'publish' ? 'Published' : pub.status === 'sent' ? 'Sent' : `Saved as ${pub.status}`} on ${pub.siteName}`;
         const site = d.sites.find((x) => x.id === writer.siteId);
+        if (pub.status === 'publish' && site && site.gbp && site.gbp.postFromArticles && site.gbp.postFromArticles !== 'off') {
+          automation.postFromArticle(article, site).then((r) => {
+            if (r) store.log('publish', r === 'applied' ? `Posted "${article.title}" on Google Business Profile.` : `A Google Business Profile post about "${article.title}" is waiting for your approval.`, { articleId: article.id });
+          }).catch((e) => note(`couldn't prepare the Google Business Profile post: ${e.message}`)).finally(() => { store.save(); broadcast(); });
+        }
         if (pub.status === 'publish' && site && site.type === 'wordpress' && writer.linkOlderPosts && writer.linkOlderPosts !== 'off') {
           jobs.get(jobId).step = 'Linking from older posts';
           broadcast();
@@ -581,6 +629,7 @@ function registerIpc() {
     d.modelCache = {};
     d.google = { psiKey: null };
     d.images = { model: (d.images && d.images.model) || 'gpt-image-1' };
+    d.googleUser = { clientId: (d.googleUser && d.googleUser.clientId) || '' };
     for (const c of d.connectors) {
       delete c.oauthTokens; delete c.oauthClient; delete c.codeVerifier; c.secret = null;
       c.lastError = 'Sign in again. Saved sign-ins were erased when the password was reset.';
@@ -859,6 +908,7 @@ function registerIpc() {
     let client = c.id && d.clients.find((x) => x.id === c.id);
     if (!client) { client = { id: store.uid(), createdAt: new Date().toISOString() }; d.clients.push(client); }
     Object.assign(client, { name: String(c.name).trim(), contact: String(c.contact || '').trim(), email: String(c.email || '').trim(), notes: String(c.notes || '') });
+    for (const k of ['monthlyReport', 'weeklyUpdate', 'emailTasks', 'reportFormats']) if (k in c) client[k] = c[k];
     if (Array.isArray(c.siteIds)) {
       for (const site of d.sites) {
         if (c.siteIds.includes(site.id)) site.clientId = client.id;
@@ -1028,6 +1078,88 @@ function registerIpc() {
       return r;
     } finally { store.save(); broadcast(); }
   });
+  // ---------- Release 2: Google account, tasks, digest, reports ----------
+  handle('guser:signIn', async (id, secret, features) => { try { return await guser.signIn(id, secret, features || ['gmail']); } finally { broadcast(); } });
+  handle('guser:disconnect', () => { guser.disconnect(); broadcast(); });
+  handle('guser:gbpLocations', async () => { try { return await guser.gbpLocations(); } finally { broadcast(); } });
+  handle('site:setGbp', (id, cfg = {}) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site) throw new Error('Website not found.');
+    site.gbp = { ...(site.gbp || {}), ...cfg };
+    store.save();
+    broadcast();
+  });
+  handle('gbp:checkNow', async (siteId) => {
+    const site = store.data.sites.find((x) => x.id === siteId);
+    if (!site) throw new Error('Website not found.');
+    try { return await automation.checkReviews(site); } finally { broadcast(); }
+  });
+  handle('task:save', (t = {}) => {
+    const d = store.data;
+    d.tasks = d.tasks || [];
+    if (!String(t.title || '').trim()) throw new Error('Give the task a title.');
+    let task = t.id && d.tasks.find((x) => x.id === t.id);
+    if (!task) {
+      task = automation.addTask({ source: 'manual', ...t, id: undefined });
+      if (!task) throw new Error('There is already an open task with that title.');
+    } else {
+      for (const k of ['title', 'notes', 'clientId', 'siteId', 'priority', 'due']) if (k in t) task[k] = t[k];
+      if (t.siteId && !t.clientId) task.clientId = (d.sites.find((x) => x.id === t.siteId) || {}).clientId || task.clientId;
+    }
+    store.save();
+    broadcast();
+    return task.id;
+  });
+  handle('task:status', (id, status) => {
+    const t = (store.data.tasks || []).find((x) => x.id === id);
+    if (!t || !['todo', 'doing', 'done'].includes(status)) return;
+    t.status = status;
+    t.doneAt = status === 'done' ? new Date().toISOString() : null;
+    store.save();
+    broadcast();
+  });
+  handle('task:delete', (ids) => {
+    const set = new Set([].concat(ids));
+    store.data.tasks = (store.data.tasks || []).filter((x) => !set.has(x.id));
+    store.save();
+    broadcast();
+  });
+  handle('task:draftReply', async (id) => { const r = await automation.draftReply(id); shell.openExternal(r.url); return r; });
+  handle('digest:run', () => automation.runDigest({ manual: true }));
+  handle('gmail:scanNow', async () => { try { return await automation.scanClientEmails(); } finally { broadcast(); } });
+  handle('client:weeklyNow', async (id) => {
+    const c = (store.data.clients || []).find((x) => x.id === id);
+    if (!c) throw new Error('Client not found.');
+    const r = await automation.weeklyUpdate(c, { manual: true });
+    shell.openExternal(r.url);
+    return r;
+  });
+  handle('client:reportNow', async (id, offset) => {
+    const c = (store.data.clients || []).find((x) => x.id === id);
+    if (!c) throw new Error('Client not found.');
+    try { return await automation.monthlyReport(c, { offset: Number(offset) || -1 }); } finally { broadcast(); }
+  });
+  handle('report:open', (id, fmt) => {
+    const r = (store.data.reports || []).find((x) => x.id === id);
+    const f = r && r.files && r.files[fmt];
+    if (!f || !fs.existsSync(f)) throw new Error('That file was moved or deleted.');
+    return shell.openPath(f);
+  });
+  handle('report:reveal', (id) => {
+    const r = (store.data.reports || []).find((x) => x.id === id);
+    const f = r && r.files && (r.files.pdf || r.files.docx);
+    if (f) shell.showItemInFolder(f);
+  });
+  handle('audit:export', async (runId) => {
+    const r = store.data.auditRuns.find((x) => x.id === runId);
+    if (!r || !r.reportPath) throw new Error('This run has no report.');
+    const text = fs.readFileSync(r.reportPath, 'utf8');
+    r.exports = await reports.exportMarkdown(text, r.reportPath.replace(/\.md$/, ''), { title: r.jobName, meta: [['Website', r.siteUrl || ''], ['Date', new Date(r.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })]] });
+    store.save();
+    broadcast();
+    shell.showItemInFolder(r.exports.pdf || r.exports.docx);
+    return r.exports;
+  });
   handle('images:set', (cfg = {}) => {
     const d = store.data;
     d.images = d.images || {};
@@ -1064,9 +1196,11 @@ if (gotLock) {
 
     connectorMgr = createConnectors(store);
     google = createGoogle({ store, openExternal: (u) => shell.openExternal(u) });
-    builtins = createBuiltins({ store, google });
+    guser = createGoogleUser({ store, openExternal: (u) => shell.openExternal(u) });
+    builtins = createBuiltins({ store, google, guser });
     auditor = createAuditor({
       store, connectors: connectorMgr, builtins, providers, codex, codexCmd, codexProblem, onChange: broadcast,
+      afterRun: (job, rec, text) => automation.afterAudit(job, rec, text),
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
       paths: {
         execPath: () => process.execPath,
@@ -1079,13 +1213,19 @@ if (gotLock) {
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
       runAudit: (job, context) => auditor.runJob(job, { context })
     });
+    reports = createReports({ store, google, ai: assistantAi, htmlToPdf, monitorStatus: (id) => (monitor ? monitor.status(id) : null) });
     scheduler = createScheduler({ store, runSchedule, notify, onChange: broadcast });
+    automation = createAutomation({
+      store, ai: assistantAi, guser, google, builtins, reports, onChange: broadcast, upcoming: (h) => scheduler.upcoming(h),
+      notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined)
+    });
     registerIpc();
     createWindow(!startHidden);
     createTray();
     applySettings({ __init: true, launchAtLogin: store.data.settings.launchAtLogin });
     scheduler.start();
     monitor.start();
+    automation.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }
     repairCodexIfNeeded();
     // Check ChatGPT sign-in in the background if it has been used before

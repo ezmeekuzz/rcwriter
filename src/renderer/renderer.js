@@ -118,6 +118,12 @@ function renderSidebar() {
     if (b.dataset.view === 'today') {
       b.innerHTML = `Today${S.jobs.length ? `<span class="badge">${S.jobs.length} writing</span>` : ''}`;
     }
+    if (b.dataset.view === 'tasks') {
+      const today = new Date().toLocaleDateString('en-CA');
+      const due = (S.tasks || []).filter((t) => t.status !== 'done' && t.due && t.due <= today).length;
+      const fresh = (S.tasks || []).filter((t) => t.status === 'todo' && Date.now() - new Date(t.createdAt) < 24 * 36e5).length;
+      b.innerHTML = `Tasks${due ? `<span class="badge">${due} due</span>` : fresh ? `<span class="badge">${fresh} new</span>` : ''}`;
+    }
     if (b.dataset.view === 'audits') {
       const n = S.approvals.filter((a) => a.status === 'pending').length;
       b.innerHTML = `Audits${S.auditRunning.length ? '<span class="badge">running</span>' : n ? `<span class="badge">${n} to approve</span>` : ''}`;

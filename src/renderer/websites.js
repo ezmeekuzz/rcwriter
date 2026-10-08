@@ -42,6 +42,7 @@ function viewSitesShared() {
           <div class="meta">${esc(site.url)} · ${state}</div>
           <div class="meta">Google: ${gBits.length ? esc(gBits.join(', ')) : S.google.connected ? 'not linked yet' : 'connect Google above to link data'}</div>
           <div class="meta">Audit tools: ${builtins.length ? esc(builtins.join(', ')) : 'none'}</div>
+          ${site.gbp && site.gbp.location ? `<div class="meta">Google Business Profile: ${esc(site.gbp.title || 'linked')}${site.gbp.reviewReplies && site.gbp.reviewReplies !== 'off' ? ` · review replies ${site.gbp.reviewReplies === 'auto' ? 'automatic' : 'for approval'}` : ''}${site.gbp.postFromArticles && site.gbp.postFromArticles !== 'off' ? ' · posts from new articles' : ''}</div>` : ''}
           ${site.type !== 'webhook' ? `<div class="meta">${healthDot(site.monitor && site.monitor.enabled ? site.health : null)}${esc(healthText(site))}</div>` : ''}
           ${S.clients.length ? `<div class="meta inline-pace">Client <select data-change="site-client" data-id="${site.id}" aria-label="Client for ${esc(site.name)}"><option value="">None</option>${S.clients.map((c) => `<option value="${c.id}" ${site.clientId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>` : ''}
           <div class="meta">${writers.length ? `Writers: ${esc(writers.join(', '))}` : 'No writers publish here'}${audits.length ? ` · Audits: ${esc(audits.join(', '))}` : ''}</div>
@@ -53,6 +54,7 @@ function viewSitesShared() {
         <div class="btn-row">
           ${S.google.connected ? `<button class="btn" data-action="site-google" data-id="${site.id}">Google data</button>` : ''}
           ${site.type !== 'webhook' ? `<button class="btn ghost" data-action="monitor-edit" data-id="${site.id}">Monitoring</button>` : ''}
+          ${site.type !== 'webhook' ? `<button class="btn ghost" data-action="site-gbp" data-id="${site.id}">Business Profile</button>` : ''}
           <button class="btn ghost" data-action="test-site" data-id="${site.id}">Test</button>
           ${site.type === 'wordpress' ? `<button class="btn ghost" data-action="reconnect-site" data-id="${site.id}">Reconnect</button>` : site.type === 'webhook' ? `<button class="btn ghost" data-action="edit-webhook" data-id="${site.id}">Edit</button>` : `<button class="btn ghost" data-action="url-site-edit" data-id="${site.id}">Edit</button>`}
           <button class="btn ghost danger" data-action="delete-site" data-id="${site.id}">Remove</button>

@@ -262,14 +262,15 @@ function createGoogle({ store, openExternal }) {
   }
 
   // Two equal periods back to back (data lags about 2 days), per page or query.
-  async function gscCompare(siteUrl, { dimension = 'page', days = 28, minClicks = 10, limit = 20 } = {}) {
+  async function gscCompare(siteUrl, { dimension = 'page', days = 28, minClicks = 10, limit = 20, ranges = null } = {}) {
     const n = Math.max(3, Math.min(90, Number(days) || 28));
     const end = new Date(Date.now() - 2 * 864e5);
     const midEnd = new Date(end.getTime() - n * 864e5);
     const d = dimension === 'query' ? 'query' : 'page';
+    const r = ranges || { now: { start: iso(new Date(end.getTime() - (n - 1) * 864e5)), end: iso(end) }, before: { start: iso(new Date(midEnd.getTime() - (n - 1) * 864e5)), end: iso(midEnd) } };
     const [now, before] = await Promise.all([
-      gscPerformance(siteUrl, { dimensions: [d], rowLimit: 1000, startDate: iso(new Date(end.getTime() - (n - 1) * 864e5)), endDate: iso(end) }),
-      gscPerformance(siteUrl, { dimensions: [d], rowLimit: 1000, startDate: iso(new Date(midEnd.getTime() - (n - 1) * 864e5)), endDate: iso(midEnd) })
+      gscPerformance(siteUrl, { dimensions: [d], rowLimit: 1000, startDate: r.now.start, endDate: r.now.end }),
+      gscPerformance(siteUrl, { dimensions: [d], rowLimit: 1000, startDate: r.before.start, endDate: r.before.end })
     ]);
     const map = new Map();
     for (const r of before.rows) map.set(r.keys[0], { key: r.keys[0], clicksBefore: r.clicks, clicksNow: 0, impressionsBefore: r.impressions, impressionsNow: 0, positionBefore: r.position, positionNow: null });
@@ -302,6 +303,24 @@ function createGoogle({ store, openExternal }) {
     return { clicksNow: now, clicksBefore: before, days: n, endDate: r.endDate };
   }
 
+  // Totals for one date range: clicks, impressions, CTR (%) and average position.
+  async function gscSummary(siteUrl, start, end) {
+    const r = await gscPerformance(siteUrl, { dimensions: ['date'], rowLimit: 1000, startDate: start, endDate: end });
+    const clicks = r.rows.reduce((t, x) => t + x.clicks, 0);
+    const impressions = r.rows.reduce((t, x) => t + x.impressions, 0);
+    const position = impressions ? r.rows.reduce((t, x) => t + x.position * x.impressions, 0) / impressions : null;
+    return { clicks, impressions, ctr: impressions ? Math.round((clicks / impressions) * 1000) / 10 : 0, position: position === null ? null : Math.round(position * 10) / 10 };
+  }
+
+  async function ga4Totals(property, start, end, metrics = ['sessions', 'activeUsers', 'engagementRate', 'keyEvents']) {
+    const body = { dateRanges: [{ startDate: start, endDate: end }], metrics: metrics.map((name) => ({ name })) };
+    const j = await api(`${EP.gaData}/properties/${encodeURIComponent(property)}:runReport`, { method: 'POST', body });
+    const row = (j.rows || [])[0];
+    const out = {};
+    (j.metricHeaders || []).forEach((h, i) => { out[h.name] = row ? Number(row.metricValues[i].value) : 0; });
+    return out;
+  }
+
   // Search queries the site already shows up for, ranked as article ideas.
   async function opportunityQueries(siteUrl, limit = 40) {
     const r = await gscPerformance(siteUrl, { dimensions: ['query'], rowLimit: 1000 });
@@ -319,7 +338,7 @@ function createGoogle({ store, openExternal }) {
   function setPsiKey(key) { cfg().psiKey = key ? store.encrypt(String(key).trim()) : null; store.save(); }
 
   return { EP, SCOPES, configured, status, useServiceAccount, signInOAuth, disconnect, refreshLists, setPsiKey,
-    gscPerformance, gscCompare, gscTotals, gscInspect, gscSitemaps, ga4Report, gtmLive, pagespeed, opportunityQueries, _resetCache: () => { cached = null; } };
+    gscPerformance, gscCompare, gscTotals, gscSummary, ga4Totals, gscInspect, gscSitemaps, ga4Report, gtmLive, pagespeed, opportunityQueries, _resetCache: () => { cached = null; } };
 }
 
 module.exports = { createGoogle, SCOPES };
