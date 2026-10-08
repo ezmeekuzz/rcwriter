@@ -188,6 +188,13 @@ async function guardedFetch(url, init = {}, { purpose = 'audit', cacheable = fal
     const body = await res.text();
     const block = suspicious ? botBlock(res, body) : null;
     if (block) {
+      const cur = state()[host];
+      if (purpose === 'connect' && cur && cur.pausedUntil && cur.pausedUntil > Date.now()) {
+        // A manual retry during a pause: report it, but don't count another strike.
+        const err = new BlockedError({ ...block, message: `${block.message} It's still happening, so RCWriter stays paused for ${host} until ${new Date(cur.pausedUntil).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}. Please don't retry until then: each attempt keeps the flag active.` });
+        err.paused = { host, ...cur };
+        throw err;
+      }
       const p = pause(host, block.provider, res.headers.get('retry-after'));
       const err = new BlockedError({ ...block, message: `${block.message} RCWriter has stopped contacting ${host} directly until ${new Date(p.pausedUntil).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })} so the block can lift.` });
       err.paused = { host, ...p };

@@ -64,7 +64,7 @@ No tool can promise a host will never flag it. The only guarantee is the host ex
 
 ## Install (Windows)
 
-1. Double-click **RCWriter-Setup-1.5.1.exe**.
+1. Double-click **RCWriter-Setup-1.5.2.exe**.
 2. Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Click **More info**, then **Run anyway**.
 3. Choose who to install for and where, then **set your password** on the "Set a password" page (or leave it empty to skip).
 4. Click **Install**, then **Finish**. RCWriter opens and asks for your password.

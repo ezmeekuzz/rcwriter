@@ -5,7 +5,7 @@ function botBlock(res, text = '') {
   const h = (k) => (res.headers && res.headers.get(k)) || '';
   const body = String(text || '').slice(0, 5000);
   if (h('sg-captcha') || /\/\.well-known\/sgcaptcha\//.test(body)) {
-    return { provider: 'SiteGround', message: "The website's host (SiteGround) answered with its anti-bot check instead of the page, so RCWriter couldn't read it. This usually happens after many quick requests from the same internet connection. It normally clears by itself within a few hours. To stop it happening, ask SiteGround support to whitelist your internet (IP) address for this site." };
+    return { provider: 'SiteGround', message: "SiteGround's Anti-Bot has flagged your internet connection (your IP address), so it shows a captcha to any app on this connection that isn't a web browser. This isn't caused by RCWriter's settings, and the site still works in your browser. The permanent fix is to ask SiteGround support to exempt your IP address from the Anti-Bot AI for this site. Otherwise the flag usually lifts once no requests arrive for several hours." };
   }
   if (h('cf-mitigated') === 'challenge' || ([403, 503].includes(res.status) && /cf-chl|challenge-platform|Just a moment\.\.\./i.test(body))) {
     return { provider: 'Cloudflare', message: "Cloudflare's bot protection blocked RCWriter. In Cloudflare, add a WAF custom rule that skips the challenge for your IP address (or for /wp-json/), then try again." };
