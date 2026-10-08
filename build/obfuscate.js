@@ -23,6 +23,17 @@ const root = path.resolve(process.argv[2] || path.join(__dirname, '..', 'src'));
 // leave it untouched so the spawn path and its runtime stay predictable.
 const SKIP = new Set(['gateway.js']);
 
+// The renderer files are loaded as several classic <script> tags that SHARE one
+// global scope (unlike the main-process CommonJS modules, which each have their
+// own scope). Obfuscating them separately makes their top-level identifiers
+// collide ("Identifier 'o' has already been declared"), which stops the scripts
+// that hold the UI event handlers from running. So we leave the renderer source
+// readable and obfuscate only the main-process code, where the real logic lives.
+// The ownership mark in the renderer is still enforced at runtime by the checks
+// in main.js (see ownership.js), which stay obfuscated.
+const SKIP_DIRS = [path.join(root, 'renderer')];
+const inSkippedDir = (full) => SKIP_DIRS.some((d) => full === d || full.startsWith(d + path.sep));
+
 const options = {
   compact: true,
   renameGlobals: false,
@@ -45,8 +56,8 @@ function walk(dir) {
   for (const name of fs.readdirSync(dir)) {
     const full = path.join(dir, name);
     const stat = fs.statSync(full);
-    if (stat.isDirectory()) out.push(...walk(full));
-    else if (name.endsWith('.js') && !SKIP.has(name)) out.push(full);
+    if (stat.isDirectory()) { if (!inSkippedDir(full)) out.push(...walk(full)); }
+    else if (name.endsWith('.js') && !SKIP.has(name) && !inSkippedDir(dir)) out.push(full);
   }
   return out;
 }
