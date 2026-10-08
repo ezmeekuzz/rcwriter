@@ -19,6 +19,9 @@ const { createGoogleUser } = require('./googleuser');
 const { createReports } = require('./reports');
 const { createAutomation } = require('./automation');
 const { createDistribution } = require('./distribution');
+const { createSeo } = require('./seo');
+const { createWebdev } = require('./webdev');
+const { capture, closeWindow } = require('./capture');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -46,6 +49,8 @@ let guser = null;
 let reports = null;
 let automation = null;
 let distribution = null;
+let seo = null;
+let webdev = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
 let locked = false;
@@ -194,6 +199,10 @@ function publicState() {
     reports: (d.reports || []).slice(0, 200),
     googleUser: guser ? guser.status() : { connected: false },
     distribution: distribution ? distribution.status() : {},
+    seoBySite: Object.fromEntries(d.sites.map((x) => [x.id, seoSummary(x)])),
+    indexWatch: (d.indexWatch || []).slice(0, 300),
+    titleTests: (d.titleTests || []).slice(0, 200),
+    webdevBySite: webdev ? Object.fromEntries(d.sites.map((x) => [x.id, webdev.status(x.id)])) : {},
     assistantAi: assistantChoice(),
     paces: Object.fromEntries(Object.entries(hostGuard.PACES).map(([k, v]) => [k, { label: v.label, gapMs: v.gapMs, auditPerDay: v.auditPerDay }])),
     connectors: d.connectors.map(({ secret, oauthTokens, oauthClient, codeVerifier, oauthState, ...rest }) => ({ ...rest, hasSecret: !!secret, signedIn: rest.auth === 'oauth' ? !!oauthTokens : rest.auth === 'apikey' ? !!secret : true })),
@@ -270,9 +279,21 @@ async function htmlToPdf(html) {
     await w.loadFile(file);
     return await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, pageSize: 'A4' });
   } finally {
-    w.destroy();
+    await closeWindow(w);
     fs.rmSync(file, { force: true });
   }
+}
+
+function seoSummary(site) {
+  const c = site.seo || {};
+  const hist = ((store.data.ranks || {})[site.id]) || {};
+  const keywords = (c.keywords || []).map((kw) => {
+    const h = hist[kw] || [];
+    const last = h[h.length - 1];
+    const week = h.filter((x) => last && new Date(x.date) <= new Date(Date.parse(last.date) - 6 * 864e5)).pop();
+    return { keyword: kw, position: last ? last.position : null, clicks: last ? last.clicks : null, weekAgo: week ? week.position : null, history: h.slice(-30).map((x) => x.position) };
+  });
+  return { keywords, rankAlerts: c.rankAlerts !== false, indexWatch: c.indexWatch !== false, titleTests: { enabled: false, mode: 'approve', maxActive: 3, ...(c.titleTests || {}) } };
 }
 
 // Puts an action in the approval queue, or runs it now when mode is 'auto'.
@@ -327,6 +348,11 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
   try {
     const recentTitles = d.articles.filter((a) => a.writerId === writer.id).map((a) => a.title);
     let keyword = null;
+    let planned = null;
+    if (!topic && writer.topicMode === 'plan') {
+      planned = seo.nextPlanned(writer);
+      if (planned) topic = planned.topic; else note('its topic plan is used up, so it chose a topic itself. Make a new plan in Writers.');
+    }
     if (!topic && writer.topicMode === 'research') {
       jobs.get(jobId).step = 'Researching keywords';
       broadcast();
@@ -344,10 +370,11 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
     broadcast();
     const siteContext = await buildSiteContext(writer);
     const article = await generator.run({
-      writer: { ...writer, siteContext, topicMode: writer.topicMode === 'research' ? 'ai' : writer.topicMode }, topicOverride: topic, schedule, settings: d.settings,
+      writer: { ...writer, siteContext, topicMode: ['research', 'plan'].includes(writer.topicMode) ? 'ai' : writer.topicMode }, topicOverride: topic, schedule, settings: d.settings,
       providerCfg: cfg, generate: providers.generate, recentTitles, uid: store.uid
     });
     if (keyword) article.keyword = keyword;
+    if (planned) { planned.item.status = 'written'; planned.item.articleId = article.id; if (planned.item.keyword) article.keyword = { keyword: planned.item.keyword, volume: planned.item.volume, difficulty: planned.item.difficulty, why: `From the topic plan (${planned.item.cluster || 'no cluster'}).` }; }
     if (writer.qualityCheck || (writer.imageSource && writer.imageSource !== 'none') || (writer.schemaTypes || []).length) {
       jobs.get(jobId).step = writer.qualityCheck ? 'Checking quality' : 'Finishing';
       broadcast();
@@ -373,6 +400,7 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
         const pub = await publishArticle(article.id, writer.siteId, { status, categories: writer.wpCategories, tags: writer.wpTags });
         publishNote += `\n${pub.status === 'publish' ? 'Published' : pub.status === 'sent' ? 'Sent' : `Saved as ${pub.status}`} on ${pub.siteName}`;
         const site = d.sites.find((x) => x.id === writer.siteId);
+        if (pub.status === 'publish' && site && pub.url) seo.watchUrl(site, pub.url, article.title);
         if (pub.status === 'publish' && writer.social && writer.social.enabled) {
           shareOnSocial(article, writer).then((r) => {
             if (r) store.log('publish', r.applied ? `Shared "${article.title}" on social (${r.applied} post${r.applied > 1 ? 's' : ''}).` : `${r.queued} social post${r.queued > 1 ? 's' : ''} for "${article.title}" ${r.queued > 1 ? 'are' : 'is'} waiting for your approval.`, { articleId: article.id });
@@ -1213,6 +1241,46 @@ function registerIpc() {
       return r;
     } finally { broadcast(); }
   });
+  // ---------- Release 4a: SEO and web developer tools ----------
+  const siteById = (id) => { const s = store.data.sites.find((x) => x.id === id); if (!s) throw new Error('Website not found.'); return s; };
+  handle('seo:setConfig', (id, cfg = {}) => {
+    const s = siteById(id);
+    const c = { ...(s.seo || {}), ...cfg };
+    if ('keywords' in cfg) c.keywords = [...new Set(String(Array.isArray(cfg.keywords) ? cfg.keywords.join('\n') : cfg.keywords || '').split(/\n|,/).map((k) => k.trim().toLowerCase()).filter(Boolean))].slice(0, 100);
+    s.seo = c;
+    store.save();
+    broadcast();
+  });
+  handle('seo:checkRanks', async (id) => { try { return await seo.checkRanks(siteById(id)); } finally { broadcast(); } });
+  handle('seo:suggestKeywords', (id) => seo.suggestKeywords(siteById(id)));
+  handle('seo:checkIndexing', async (id) => { try { return await seo.checkIndexing(siteById(id)); } finally { broadcast(); } });
+  handle('seo:watchUrl', (id, url) => { const s = siteById(id); seo.watchUrl(s, sites.normalizeUrl(url)); store.save(); broadcast(); });
+  handle('seo:removeWatch', (wid) => { store.data.indexWatch = (store.data.indexWatch || []).filter((x) => x.id !== wid); store.save(); broadcast(); });
+  handle('seo:startTitleTests', async (id) => { try { return await seo.startTitleTests(siteById(id)); } finally { broadcast(); } });
+  handle('writer:planTopics', async (id, count) => {
+    const w = store.data.writers.find((x) => x.id === id);
+    if (!w) throw new Error('Writer not found.');
+    try { return await seo.planTopics(w, { count: Math.max(4, Math.min(40, Number(count) || 12)) }); } finally { broadcast(); }
+  });
+  handle('writer:setPlan', (id, plan) => {
+    const w = store.data.writers.find((x) => x.id === id);
+    if (!w) throw new Error('Writer not found.');
+    w.plan = Array.isArray(plan) ? plan : [];
+    store.save();
+    broadcast();
+  });
+  handle('webdev:setConfig', (id, cfg = {}) => { const s = siteById(id); s.webdev = { ...(s.webdev || {}), ...cfg }; store.save(); broadcast(); });
+  handle('webdev:check', async (id, what) => {
+    const s = siteById(id);
+    const fn = { updates: webdev.checkUpdates, security: webdev.security, domain: webdev.domainEmail, speed: webdev.speed, form: webdev.formTest }[what];
+    if (!fn) throw new Error('Unknown check.');
+    try { return await fn(s); } finally { broadcast(); }
+  });
+  handle('webdev:runUpdates', (id, slugs) => {
+    const s = siteById(id);
+    webdev.runUpdates(s, slugs).catch((e) => win?.webContents.send('toast', { msg: e.message, kind: 'error' }));
+    return true;
+  });
   handle('images:set', (cfg = {}) => {
     const d = store.data;
     d.images = d.images || {};
@@ -1250,7 +1318,7 @@ if (gotLock) {
     connectorMgr = createConnectors(store);
     google = createGoogle({ store, openExternal: (u) => shell.openExternal(u) });
     guser = createGoogleUser({ store, openExternal: (u) => shell.openExternal(u) });
-    builtins = createBuiltins({ store, google, guser, socialTools: () => (distribution ? distribution.tools() : []) });
+    builtins = createBuiltins({ store, google, guser, socialTools: () => (distribution ? distribution.tools() : []), visualTools: (s) => (webdev ? webdev.visualTools(s) : []) });
     auditor = createAuditor({
       store, connectors: connectorMgr, builtins, providers, codex, codexCmd, codexProblem, onChange: broadcast,
       afterRun: (job, rec, text) => automation.afterAudit(job, rec, text),
@@ -1279,6 +1347,12 @@ if (gotLock) {
     applySettings({ __init: true, launchAtLogin: store.data.settings.launchAtLogin });
     scheduler.start();
     monitor.start();
+    seo = createSeo({ store, google, ai: assistantAi, builtins, auditor, onChange: broadcast, queueAction, addTask: (t) => automation.addTask(t), postsFor,
+      notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
+    webdev = createWebdev({ store, google, onChange: broadcast, addTask: (t) => automation.addTask(t), capture, connectors: connectorMgr, auditor,
+      notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
+    setInterval(() => { try { seo.tick(); webdev.tick(); } catch (e) { console.error(e); } }, 60000);
+    setTimeout(() => { try { seo.tick(); webdev.tick(); } catch { /* next minute */ } }, 45000);
     automation.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }
     repairCodexIfNeeded();

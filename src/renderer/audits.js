@@ -16,15 +16,16 @@ const MODE_HELP = {
 const RISK_LABEL = { read: 'Read-only', safe: 'Safe to auto-fix', approval: 'Needs approval', off: 'Never use' };
 const BUILTIN_HELP = { web: 'Checks pages, crawls the site, finds broken links, reads the sitemap and robots.txt, runs PageSpeed tests.', wp: 'Reads posts, pages, media and plugins, and can edit titles, excerpts, content, image alt text and post status.', google: 'Search Console, GA4 and Tag Manager data for this site.' };
 const TEMPLATE_LABEL = { agency: 'Full SEO audit (your team\'s report format)', technical: 'Technical SEO health check', content: 'Content and on-page SEO', rankings: 'Rankings, traffic and backlinks', maintenance: 'WordPress maintenance',
-  refresh: 'Refresh posts that are losing traffic', competitors: 'Competitor watch', aiVisibility: 'AI search visibility (Ahrefs Brand Radar)', backlinks: 'Lost backlinks and reclaim emails', custom: 'Write my own instructions' };
-const NEED_LABEL = { google: 'Search Console linked to this website', wp: 'the website connected as WordPress', ahrefs: 'Ahrefs', semrush: 'Semrush', 'ahrefs|semrush': 'Ahrefs or Semrush' };
+  refresh: 'Refresh posts that are losing traffic', competitors: 'Competitor watch', aiVisibility: 'AI search visibility (Ahrefs Brand Radar)', backlinks: 'Lost backlinks and reclaim emails',
+  redirects: '404 to redirect fixer', local: 'Local SEO check', accessibility: 'Accessibility (WCAG) audit', custom: 'Write my own instructions' };
+const NEED_LABEL = { gbp: 'Google Business Profile linked to this website', google: 'Search Console linked to this website', wp: 'the website connected as WordPress', ahrefs: 'Ahrefs', semrush: 'Semrush', 'ahrefs|semrush': 'Ahrefs or Semrush' };
 
 function missingNeeds(d) {
   const needs = (S.templateNeeds || {})[d.template] || [];
   const kinds = (d.siteId ? (S.builtinBySite[d.siteId] || []) : []).map((b) => b.kind);
   const chosen = S.connectors.filter((c) => (d.connectorIds || []).includes(c.id)).map((c) => `${c.preset || ''} ${c.name}`.toLowerCase());
   return needs.filter((n) => {
-    if (n === 'google' || n === 'wp') return !kinds.includes(n);
+    if (n === 'google' || n === 'wp' || n === 'gbp') return !kinds.includes(n);
     return !n.split('|').some((x) => chosen.some((c) => c.includes(x)));
   }).map((n) => NEED_LABEL[n] || n);
 }
@@ -44,8 +45,8 @@ function runningRun(jobId) { return S.auditRunning.find((r) => r.jobId === jobId
 function viewAudits() {
   const pending = pendingApprovals().length;
   const down = S.sites.filter((x) => x.health && x.health.status === 'down').length;
-  const tabs = [['jobs', 'Audits'], ['approvals', `Approvals${pending ? ` (${pending})` : ''}`], ['changes', 'Change log'], ['reports', 'Reports'], ['monitoring', `Monitoring${down ? ` (${down} down)` : ''}`], ['connections', 'Connections']];
-  const body = { jobs: auditJobsTab, approvals: approvalsTab, changes: changesTab, reports: reportsTab, monitoring: window.monitoringTab, connections: connectionsTab }[auditTab]();
+  const tabs = [['jobs', 'Audits'], ['approvals', `Approvals${pending ? ` (${pending})` : ''}`], ['changes', 'Change log'], ['reports', 'Reports'], ['rankings', 'Rankings'], ['monitoring', `Monitoring${down ? ` (${down} down)` : ''}`], ['maintenance', 'Maintenance'], ['connections', 'Connections']];
+  const body = { jobs: auditJobsTab, approvals: approvalsTab, changes: changesTab, reports: reportsTab, monitoring: window.monitoringTab, rankings: window.rankingsTab, maintenance: window.maintenanceTab, connections: connectionsTab }[auditTab]();
   const running = S.auditRunning.map((r) => `
     <div class="writing-now"><div class="spinner"></div><div style="flex:1"><strong>${esc(r.jobName)}</strong> is ${r.kind === 'revert' ? 'undoing a change' : 'auditing'}${r.siteUrl ? ` ${esc(r.siteUrl)}` : ''}. ${r.toolCalls} tool calls so far, ${r.applied} changes made, ${r.queued} waiting for approval.</div>
     <button class="btn" data-action="audit-stop" data-id="${r.id}">Stop</button></div>`).join('');

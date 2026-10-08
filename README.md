@@ -61,6 +61,23 @@ Each writer can now do more around every article, under **Before publishing** an
   - Published articles also have a **Share on social** button.
 - **Monthly newsletter:** for each client, on a day you choose, the AI turns last month's published articles into a newsletter (subject, preview text, intro, a teaser and image per article). With a Mailchimp API key and an audience chosen, it's created as a **draft campaign in Mailchimp** for you to review and send; otherwise it's saved as an HTML file. You can also make one from Client reports.
 
+## SEO and web developer tools (1.9)
+
+**Site audits → Rankings**
+- **Rank tracking:** add up to 100 keywords per website (or pick from searches it already shows up for). Every morning RCWriter records each keyword's 7-day average position from Search Console and alerts you when one drops off page 1 or falls 5 places.
+- **Indexing watch:** every article a writer publishes is checked with Search Console URL Inspection. If Google hasn't indexed it after 7 days, you get an alert and a task with the reason.
+- **Title tests:** every Monday, pages with lots of impressions but a click-through rate well below normal for their position get a new title and description (for approval or automatically). After 28 days RCWriter keeps the winner and puts the original back if the test lost.
+- **Topic plans:** Writers → Topic plan builds a topic map in clusters from keyword research, and the "Follow the topic plan" topic order writes it in order.
+
+**Site audits → Maintenance** (turn on per website)
+- **Updates:** daily check of plugins against wordpress.org and of the WordPress version. **Update safely** has the AI update plugins one at a time through WPVibe (WP-CLI), comparing screenshots of key pages before and after each one and rolling back any plugin that breaks a page.
+- **Security watch:** new administrator accounts, hidden spam links, Japanese keyword hack text and new third-party scripts on the homepage.
+- **Contact form test:** a weekly test through a Contact Form 7 form, with an alert if the email fails to send.
+- **Domain and email:** domain expiry (RDAP) and SPF, DKIM and DMARC records.
+- **Speed trends:** weekly PageSpeed scores for the homepage and top pages, with an alert when they get slower.
+
+**New audit starting points:** 404 to redirect fixer (adds 301s with the Redirection plugin), local SEO check (name, address and phone consistency) and accessibility (WCAG) audit, with new tools `wp_add_redirect`, `wp_list_redirects` and `accessibility_check`.
+
 **Writers use site data:** with a WordPress site selected, a writer reads the site's published posts so it doesn't repeat them and links to related ones. With Search Console linked, it aims articles at searches the site already appears for but isn't in the top 3 for yet.
 
 ## Site audits
@@ -185,6 +202,9 @@ src/reports.js     Word and PDF reports
 src/automation.js  Tasks, daily digest, Gmail and Business Profile automations
 src/googleuser.js  Your Google account: Gmail and Business Profile
 src/distribution.js  Social posts (Buffer, webhook) and Mailchimp newsletters
+src/seo.js         Rank tracking, indexing watch, title tests, topic plans
+src/webdev.js      Updates, security, form, domain/email and speed checks
+src/capture.js     Page screenshots for visual checks
 src/lock.js        App password
 src/codex-install.js  One-click Codex download
 build/installer.nsh   Installer password page

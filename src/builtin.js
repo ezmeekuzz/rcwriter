@@ -81,6 +81,22 @@ function analyzeHtml(html, pageUrl) {
   };
 }
 
+// Quick accessibility checks on raw HTML (Lighthouse covers contrast and ARIA).
+function a11yChecks(html) {
+  const imgs = [...html.matchAll(/<img\s[^>]*>/gi)].map((m) => attrs(m[0]));
+  const inputs = [...html.matchAll(/<(input|select|textarea)\s[^>]*>/gi)].map((m) => ({ tag: m[1].toLowerCase(), ...attrs(m[0]) })).filter((i) => !['hidden', 'submit', 'button', 'image', 'reset'].includes(String(i.type || '').toLowerCase()));
+  const labelFor = new Set([...html.matchAll(/<label[^>]*\bfor=["']?([^"'\s>]+)/gi)].map((m) => m[1]));
+  const unlabeled = inputs.filter((i) => !(i.id && labelFor.has(i.id)) && !i['aria-label'] && !i['aria-labelledby'] && !i.title);
+  const links = [...html.matchAll(/<a\s[^>]*>([\s\S]*?)<\/a>/gi)].map((m) => ({ a: attrs(m[0]), text: strip(m[1]), hasImg: /<img[^>]+alt=["'][^"']+/i.test(m[1]) }));
+  const vague = links.filter((l) => /^(click here|here|read more|more|learn more|this|link)$/i.test(l.text) && !l.a['aria-label']).map((l) => l.text);
+  const emptyLinks = links.filter((l) => !l.text && !l.hasImg && !l.a['aria-label'] && !l.a.title).length;
+  const emptyButtons = [...html.matchAll(/<button\s?[^>]*>([\s\S]*?)<\/button>/gi)].filter((m) => !strip(m[1]) && !/aria-label|title=/i.test(m[0])).length;
+  const levels = [...html.matchAll(/<h([1-6])\b/gi)].map((m) => Number(m[1]));
+  const skips = levels.filter((l, i) => i && l > levels[i - 1] + 1).length;
+  return { lang: (html.match(/<html[^>]*\blang=["']?([\w-]+)/i) || [])[1] || 'missing', imagesWithoutAlt: imgs.filter((i) => !('alt' in i)).length, images: imgs.length,
+    formFieldsWithoutLabel: unlabeled.length, formFields: inputs.length, emptyLinks, emptyButtons, vagueLinkText: [...new Set(vague)].slice(0, 10), headingLevelSkips: skips, h1Count: levels.filter((l) => l === 1).length };
+}
+
 async function checkUrl(url) {
   try {
     let t = await fetchTraced(url, { method: 'HEAD', timeoutMs: 20000 });
@@ -101,7 +117,7 @@ async function pool(items, n, fn) {
   return out;
 }
 
-function createBuiltins({ store, google, guser = null, socialTools = null }) {
+function createBuiltins({ store, google, guser = null, socialTools = null, visualTools = null }) {
   const site = (id) => store.data.sites.find((s) => s.id === id);
   const wpAuth = (s) => ({ user: s.username, pass: store.decrypt(s.secret) });
   const wp = (s, route, opts = {}) => sitesLib.wpRequest(s, wpAuth(s), route, { ...opts, purpose: 'audit' });
@@ -208,7 +224,14 @@ function createBuiltins({ store, google, guser = null, socialTools = null }) {
         return r.ok ? clip(await r.text(), 8000) : `robots.txt returned HTTP ${r.status}`;
       }),
       T('pagespeed', 'Run Google PageSpeed Insights (Lighthouse) for a URL: performance score, LCP, CLS, TBT, page weight, real-user Core Web Vitals and the biggest opportunities such as unused CSS/JS.',
-        { url: { type: 'string' }, strategy: { type: 'string', enum: ['mobile', 'desktop'] } }, ['url'], 'read', async ({ url, strategy }) => json(await google.pagespeed(url, strategy)))
+        { url: { type: 'string' }, strategy: { type: 'string', enum: ['mobile', 'desktop'] } }, ['url'], 'read', async ({ url, strategy }) => json(await google.pagespeed(url, strategy))),
+      T('accessibility_check', 'Accessibility (WCAG) check of one page: Google Lighthouse accessibility score and failing checks (contrast, labels, names, ARIA), plus RCWriter\'s own checks of images without alt text, form fields without labels, empty links and buttons, vague link text, heading order and the page language.',
+        { url: { type: 'string' } }, ['url'], 'read', async ({ url }) => {
+          const out = {};
+          try { out.lighthouse = await google.pagespeed(url, 'mobile', 'accessibility'); } catch (e) { out.lighthouse = { error: e.message }; }
+          try { const t = await fetchTraced(url); out.htmlChecks = a11yChecks(await t.res.text()); } catch (e) { if (stopErr(e)) out.htmlChecks = { error: e.message }; else throw e; }
+          return json(out);
+        })
     ];
   }
 
@@ -276,6 +299,19 @@ function createBuiltins({ store, google, guser = null, socialTools = null }) {
           const saved = await wp(s, `/wp/v2/${t}/${Number(id)}`, { method: 'POST', body: { content: r.html } });
           return { text: `Linked "${r.anchor}" to ${url} in ${saved.link}`, before: cur.content.raw };
         }, { undo: async ({ type, id }, before) => { const t = type === 'pages' ? 'pages' : 'posts'; await wp(s, `/wp/v2/${t}/${Number(id)}`, { method: 'POST', body: { content: before } }); return `Removed the added link from ${t} ${id}.`; } }),
+      T('wp_list_redirects', 'List redirects managed by the Redirection plugin (needs the plugin and an Administrator connection).', { search: { type: 'string' } }, [], 'read', async ({ search }) => {
+        const q = { per_page: 100 };
+        if (search) q['filterBy[url]'] = search;
+        const r = await wp(s, '/redirection/v1/redirect', { query: q });
+        return json((r.items || []).map((x) => ({ id: x.id, from: x.url, to: x.action_data && x.action_data.url, code: x.action_code, hits: x.hits, enabled: x.enabled })));
+      }),
+      T('wp_add_redirect', 'Add a 301 redirect with the Redirection plugin, for example from a 404 URL that still gets visits or backlinks to the best matching live page.',
+        { from: { type: 'string', description: 'Path or full URL that should redirect, e.g. /old-page/' }, to: { type: 'string', description: 'Full URL of the live page' } }, ['from', 'to'], 'approval', async ({ from, to }) => {
+          const path = String(from).replace(/^https?:\/\/[^/]+/, '') || '/';
+          const r = await wp(s, '/redirection/v1/redirect', { method: 'POST', body: { url: path, action_data: { url: to }, action_type: 'url', action_code: 301, match_type: 'url', group_id: 1 } });
+          const made = (r.items || []).find((x) => x.url === path);
+          return { text: `Redirect added: ${path} → ${to}`, before: made ? String(made.id) : '' };
+        }, { undo: async (_a, before) => { if (!before) throw new Error('The redirect id was not recorded.'); await wp(s, '/redirection/v1/bulk/redirect/delete', { method: 'POST', body: { items: [Number(before)] } }); return 'Removed the redirect.'; } }),
       T('wp_set_image_alt', 'Set the alt text of an image in the media library.', { id: { type: 'number' }, alt: { type: 'string' } }, ['id', 'alt'], 'safe', async ({ id, alt }) => {
         const cur = await wp(s, `/wp/v2/media/${Number(id)}`, { query: { context: 'edit' } });
         await wp(s, `/wp/v2/media/${Number(id)}`, { method: 'POST', body: { alt_text: alt } });
@@ -354,6 +390,7 @@ function createBuiltins({ store, google, guser = null, socialTools = null }) {
     if (s && s.type === 'wordpress' && s.secret) out.push({ id: `wp:${s.id}`, kind: 'wp', name: `WordPress (${s.name})`, tools: () => wpTools(s) });
     if (s && s.google && (s.google.gscSite || s.google.ga4Property || s.google.gtmContainer) && google.configured()) out.push({ id: `google:${s.id}`, kind: 'google', name: 'Google data', tools: () => googleTools(s) });
     if (s && s.gbp && s.gbp.location && guser && guser.has('gbp')) out.push({ id: `gbp:${s.id}`, kind: 'gbp', name: 'Google Business Profile', tools: () => gbpTools(s) });
+    if (s && visualTools && Array.isArray(job.builtins) && job.builtins.includes('visual')) out.push({ id: `visual:${s.id}`, kind: 'visual', name: 'Visual check', tools: () => visualTools(s) });
     return out;
   }
 
@@ -371,10 +408,11 @@ function createBuiltins({ store, google, guser = null, socialTools = null }) {
     else if (kind === 'google' && s) tools = googleTools(s);
     else if (kind === 'gbp' && s && s.gbp && guser) tools = gbpTools(s);
     else if (kind === 'social' && socialTools) tools = socialTools();
+    else if (kind === 'visual' && s && visualTools) tools = visualTools(s);
     return tools.find((t) => t.name === toolName) || null;
   }
 
   return { sources, available, resolve, analyzeHtml };
 }
 
-module.exports = { createBuiltins, analyzeHtml };
+module.exports = { createBuiltins, analyzeHtml, a11yChecks };

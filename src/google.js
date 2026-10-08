@@ -235,11 +235,11 @@ function createGoogle({ store, openExternal }) {
     };
   }
 
-  async function pagespeed(url, strategy = 'mobile') {
+  async function pagespeed(url, strategy = 'mobile', category = 'performance') {
     const u = new URL(EP.psi);
     u.searchParams.set('url', url);
     u.searchParams.set('strategy', strategy === 'desktop' ? 'desktop' : 'mobile');
-    u.searchParams.set('category', 'performance');
+    u.searchParams.set('category', category);
     const key = cfg().psiKey ? store.decrypt(cfg().psiKey) : '';
     if (key) u.searchParams.set('key', key);
     const res = await fetch(u, { signal: AbortSignal.timeout(120000) });
@@ -247,6 +247,12 @@ function createGoogle({ store, openExternal }) {
     if (!res.ok) throw new Error(`PageSpeed Insights: ${(j.error && j.error.message) || res.status}${res.status === 429 ? ' (add a free PageSpeed API key in Websites to raise the limit)' : ''}`);
     const lh = j.lighthouseResult || {};
     const a = lh.audits || {};
+    if (category === 'accessibility') {
+      const cat = (lh.categories || {}).accessibility || {};
+      const failing = (cat.auditRefs || []).map((r) => a[r.id]).filter((x) => x && x.score !== null && x.score < 1 && x.scoreDisplayMode !== 'notApplicable')
+        .map((x) => ({ title: x.title, items: ((x.details && x.details.items) || []).length }));
+      return { strategy, score: cat.score !== undefined ? Math.round(cat.score * 100) : null, failing };
+    }
     const v = (k) => a[k] && a[k].displayValue;
     const opps = Object.values(a).filter((x) => x.details && x.details.type === 'opportunity' && x.score !== null && x.score < 0.9)
       .sort((x, y) => ((y.details.overallSavingsMs || 0) - (x.details.overallSavingsMs || 0))).slice(0, 8)

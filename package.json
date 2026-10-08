@@ -1,7 +1,7 @@
 {
   "name": "rcwriter",
   "productName": "RCWriter",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Desktop app that writes articles on a schedule using Claude, ChatGPT, Gemini or any OpenAI-compatible model.",
   "main": "src/main.js",
   "author": "You",

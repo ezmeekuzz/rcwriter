@@ -321,3 +321,19 @@ figure.feature figcaption { margin-top: 6px; font: 12.5px/1.4 var(--ui); color: 
 .digest-body { margin: 8px 0; font-size: 13.5px; }
 .digest-body h2 { font-size: 14px; margin: 12px 0 4px; }
 .digest-body ul { margin: 0; padding-left: 18px; }
+
+/* 1.9: rankings and maintenance */
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.panel-head h3 { margin: 0; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+table.data th { text-align: left; font-weight: 600; color: var(--ink-soft); border-bottom: 1px solid var(--line); padding: 6px 8px; }
+table.data td { border-bottom: 1px solid var(--line); padding: 6px 8px; }
+table.data .num { text-align: right; white-space: nowrap; }
+.up { color: var(--ok); } .down { color: var(--danger); }
+.spark { color: var(--action); vertical-align: middle; }
+ul.plain { list-style: none; margin: 4px 0 10px; padding: 0; }
+ul.plain li { padding: 4px 0; font-size: 13px; }
+ul.plan li.done span:first-child { text-decoration: line-through; color: var(--ink-soft); }
+.maint-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px 22px; }
+.maint-grid h4, .panel h4 { margin: 12px 0 4px; font-size: 13.5px; }
+.maint-grid p { margin: 2px 0 6px; }

@@ -364,6 +364,7 @@ function viewWriters() {
         </div>
         <div class="btn-row">
           <button class="btn" data-action="run-writer" data-id="${w.id}">Write now</button>
+          <button class="btn ghost" data-action="plan-open" data-id="${w.id}">Topic plan${(w.plan || []).filter((p) => p.status === 'planned').length ? ` (${(w.plan || []).filter((p) => p.status === 'planned').length})` : ''}</button>
           <button class="btn ghost" data-action="edit-writer" data-id="${w.id}">Edit</button>
           <button class="btn ghost danger" data-action="delete-writer" data-id="${w.id}">Delete</button>
         </div>
@@ -686,7 +687,8 @@ function writerModalHtml(d) {
               <option value="rotate" ${d.topicMode === 'rotate' ? 'selected' : ''}>Go through in order</option>
               <option value="random" ${d.topicMode === 'random' ? 'selected' : ''}>Pick at random</option>
               <option value="ai" ${d.topicMode === 'ai' ? 'selected' : ''}>Treat as themes; AI picks an angle</option>
-              <option value="research" ${d.topicMode === 'research' ? 'selected' : ''}>Research a keyword first</option></select></div>
+              <option value="research" ${d.topicMode === 'research' ? 'selected' : ''}>Research a keyword first</option>
+              <option value="plan" ${d.topicMode === 'plan' ? 'selected' : ''}>Follow the topic plan</option></select></div>
             <div class="field"><label for="w-lang">Language</label><input type="text" id="w-lang" name="language" value="${esc(d.language)}"></div>
             <div class="field"><label for="w-words">Target length (words)</label><input type="number" id="w-words" name="targetWords" min="100" step="100" value="${esc(d.targetWords)}"></div>
           </div>
