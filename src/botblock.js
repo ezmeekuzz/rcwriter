@@ -16,6 +16,9 @@ function botBlock(res, text = '') {
   if ([403, 503].includes(res.status) && /wordfence/i.test(body)) {
     return { provider: 'Wordfence', message: "Wordfence blocked RCWriter. In WordPress, open Wordfence, Firewall, and allowlist your IP address (or unblock it under Blocking), then try again." };
   }
+  if (res.status === 403 && h('host-header') && /<title>\s*403 - Forbidden\s*<\/title>/i.test(body)) {
+    return { provider: 'SiteGround', message: "SiteGround's firewall refused RCWriter's request (403 Forbidden). If it keeps happening, ask SiteGround support to allow RCWriter for this site, and include your internet (IP) address." };
+  }
   if (res.status === 429) {
     return { provider: 'rate limit', message: 'The website is limiting how many requests it accepts (HTTP 429). Wait a while and try again.' };
   }

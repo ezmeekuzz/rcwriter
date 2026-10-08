@@ -24,7 +24,7 @@ function normalizeUrl(u) {
 async function fetchJson(url, opts = {}, purpose = null) {
   let res, text;
   try {
-    const init = { ...opts, headers: { 'User-Agent': UA, ...(opts.headers || {}) }, redirect: 'follow', signal: AbortSignal.timeout(60000) };
+    const init = { ...opts, headers: purpose ? { ...(opts.headers || {}) } : { 'User-Agent': UA, ...(opts.headers || {}) }, redirect: 'follow', signal: AbortSignal.timeout(60000) };
     res = purpose ? await guard.guardedFetch(url, init, { purpose }) : await fetch(url, init);
     text = await res.text();
   } catch (e) {

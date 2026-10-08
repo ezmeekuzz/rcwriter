@@ -899,6 +899,7 @@ if (gotLock) {
   app.whenReady().then(() => {
     store.load();
     hostGuard.init(store);
+    if (hostGuard.migrateIdentity()) store.log('info', 'RCWriter now identifies itself in a way hosts like SiteGround accept, so paused websites were resumed.');
     if (lock.consumeInstallerPassword()) { store.data.settings.passwordPrompted = true; store.save(); }
     if (store.data.settings.lockOnHide === undefined) store.data.settings.lockOnHide = true;
     if (store.data.settings.lockAfterMinutes === undefined) store.data.settings.lockAfterMinutes = 15;

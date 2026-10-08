@@ -58,12 +58,13 @@ Hosts such as SiteGround, Cloudflare and Wordfence challenge or block tools that
 - **Daily limit** on audit requests per site (600, 250 or 100 depending on the pace).
 - **Automatic back-off:** if a host challenges RCWriter or says "too many requests", RCWriter stops contacting that site directly for 6 hours (12, then 24 if it happens again), instead of retrying and making the block longer. Audits keep running with Search Console, PageSpeed, Ahrefs, Semrush and WPVibe data, which don't load the site from your computer. **Resume now** on the Websites page lifts the pause, for example after your host whitelists you.
 - **Audits prefer off-site data** and keep direct page checks to about 30 per run.
+- **An honest, plain identity:** RCWriter introduces itself as `RCWriter/x.y.z (+https://github.com/ezmeekuzz/rcwriter)`. Some firewalls (SiteGround's among them) refuse the `Mozilla/5.0 (compatible; …)` format that scraper bots use, so RCWriter doesn't use it, and it never pretends to be a browser.
 
 No tool can promise a host will never flag it. The only guarantee is the host exempting your IP address: on SiteGround, ask support to exempt your IP from the Anti-Bot AI for the site.
 
 ## Install (Windows)
 
-1. Double-click **RCWriter-Setup-1.5.0.exe**.
+1. Double-click **RCWriter-Setup-1.5.1.exe**.
 2. Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Click **More info**, then **Run anyway**.
 3. Choose who to install for and where, then **set your password** on the "Set a password" page (or leave it empty to skip).
 4. Click **Install**, then **Finish**. RCWriter opens and asks for your password.

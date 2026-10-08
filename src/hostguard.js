@@ -12,7 +12,12 @@
 //    retrying, which is what turns a short block into a long one
 const { botBlock, BlockedError } = require('./botblock');
 
-const UA = 'Mozilla/5.0 (compatible; RCWriter/1.5; +https://github.com/ezmeekuzz/rcwriter)';
+// A plain, honest product token. Some host firewalls (SiteGround among them)
+// refuse the "Mozilla/5.0 (compatible; Bot/1.0)" format that scrapers use, so
+// RCWriter names itself without pretending to be, or resembling, a browser.
+let VERSION = '1.5';
+try { VERSION = require('../package.json').version; } catch { /* keep default */ }
+const UA = `RCWriter/${VERSION} (+https://github.com/ezmeekuzz/rcwriter)`;
 const PACES = {
   normal: { label: 'Normal', gapMs: 800, auditPerDay: 600 },
   gentle: { label: 'Gentle', gapMs: 2000, auditPerDay: 250 },
@@ -173,7 +178,9 @@ async function guardedFetch(url, init = {}, { purpose = 'audit', cacheable = fal
     lastAt.set(host, Date.now());
     if (purpose === 'audit') countAudit(host);
 
-    const headers = { 'user-agent': UA, 'accept-language': 'en', ...(init.headers || {}) };
+    const headers = new Headers(init.headers || {});
+    headers.set('user-agent', UA); // set once, whatever the caller passed
+    if (!headers.has('accept-language')) headers.set('accept-language', 'en');
     const res = await fetch(url, { ...init, headers });
     const suspicious = [202, 403, 429, 503].includes(res.status) || res.headers.get('sg-captcha') || res.headers.get('cf-mitigated');
     const calm = () => { const cur = state()[host]; if (cur && cur.strikes) { cur.strikes = 0; save(); } };
@@ -195,4 +202,15 @@ async function guardedFetch(url, init = {}, { purpose = 'audit', cacheable = fal
 
 function clearCache() { cache.clear(); }
 
-module.exports = { init, guardedFetch, hostOf, hostStatus, resume, PACES, UA, PausedError, BudgetError, clearCache, _pause: pause };
+// Pauses recorded under an older RCWriter identity were caused by that identity.
+// Give each host a fresh start once with the current one.
+function migrateIdentity() {
+  if (!store || store.data.hostGuardUa === UA) return false;
+  const had = Object.values(state()).some((st) => st.pausedUntil && st.pausedUntil > Date.now());
+  for (const st of Object.values(state())) { delete st.pausedUntil; st.strikes = 0; }
+  store.data.hostGuardUa = UA;
+  save();
+  return had;
+}
+
+module.exports = { init, migrateIdentity, guardedFetch, hostOf, hostStatus, resume, PACES, UA, PausedError, BudgetError, clearCache, _pause: pause };
