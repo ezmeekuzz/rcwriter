@@ -151,6 +151,8 @@ function createGoogleUser({ store, openExternal }) {
     return out;
   }
 
+  async function getMessage(id) { return parseMessage(await api(`${GMAIL}/messages/${id}?format=full`)); }
+
   function mime({ to, subject, text, html, inReplyTo, references, from }) {
     const boundary = `rcw${crypto.randomBytes(8).toString('hex')}`;
     const enc = (s) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s).toString('base64')}?=`);
@@ -211,7 +213,7 @@ function createGoogleUser({ store, openExternal }) {
   }
   const gbpDeletePost = (postName) => api(`https://mybusiness.googleapis.com/v4/${postName}`, { method: 'DELETE' });
 
-  return { FEATURE_SCOPES, connected, has, status, signIn, disconnect, api, searchMessages, createDraft, send, threadReplies,
+  return { FEATURE_SCOPES, connected, has, status, signIn, disconnect, api, searchMessages, getMessage, createDraft, send, threadReplies,
     gbpLocations, gbpReviews, gbpReply, gbpDeleteReply, gbpPost, gbpDeletePost, _reset: () => { cached = null; } };
 }
 

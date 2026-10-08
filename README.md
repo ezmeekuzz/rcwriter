@@ -78,6 +78,34 @@ Each writer can now do more around every article, under **Before publishing** an
 
 **New audit starting points:** 404 to redirect fixer (adds 301s with the Redirection plugin), local SEO check (name, address and phone consistency) and accessibility (WCAG) audit, with new tools `wp_add_redirect`, `wp_list_redirects` and `accessibility_check`.
 
+## Leads, assistant and alerts (2.0)
+
+**Leads → Crawlers.** Create as many lead crawlers as you like. Each one has:
+- a **business category** and **location**, and where to look: **OpenStreetMap** (free; your AI provider translates the category into map tags), **Google Places** (API key) and **AI web search** (Claude, OpenAI or Gemini API key);
+- **limits**: leads per run, a total cap, and how many pages of each website to read;
+- an optional filter to keep only leads with an email, a phone, or either;
+- a **schedule** (manual, daily, weekly or every few hours).
+
+For each business, the crawler reads the website politely (home, contact, about and team pages, one request at a time) and collects every email (including obfuscated and Cloudflare-protected ones), phone number and social profile. Your AI provider then picks out the **contact person and their role**, other staff, a description, services, opening hours and notes for the pitch. It also notes website problems worth pitching (speed, missing titles, outdated footer…) and scores the lead. Businesses already found or contacted are never collected twice.
+
+**Leads → Leads.** Everything is saved in RCWriter: a searchable **table** (business, contact person, emails, phones, website, address, score, stage) and a **pipeline** board, a detail view with every scraped field, and **CSV export**.
+
+**Outreach, per crawler:**
+- **Email** through your Gmail: a personal first email built on what was found, then follow-ups on the days you choose, in the same thread, stopping when they reply (replies become high-priority tasks; "no thanks" stops everything). Approve each one, or send automatically.
+- **Text messages** through Twilio, approved or automatic.
+- **WhatsApp**, either prepared for one-click sending or sent automatically through the WhatsApp Business Cloud API with a Meta-approved template.
+- Daily limits for each channel, sending hours and weekdays, and an opt-out line on every email. Automatic texts and WhatsApp need a consent confirmation, because many countries restrict unsolicited messages.
+
+Also: **proposals** as Word/PDF from a lead's findings and your services and prices, and **instant replies to enquiries** (a Gmail search you choose gets reply drafts and tasks within 15 minutes).
+
+**Ask RCWriter** (on Today): ask in plain words, for example "audit Eco Pro and draft Dan's weekly update" or "how are my rankings?". It uses the app's own tools: starting audits and writers, reports, drafts, tasks, rankings, site health, Google data and leads. Website changes still only happen through your saved audits and their approval settings.
+
+**Playbooks** (Workspace): routines in plain words that Ask RCWriter runs on a schedule.
+
+**Phone alerts** through your own Telegram bot (Settings), for important alerts or everything.
+
+**Client health score** on each client: uptime, traffic trend, rankings, problems, open high-priority work and reporting, out of 100.
+
 **Writers use site data:** with a WordPress site selected, a writer reads the site's published posts so it doesn't repeat them and links to related ones. With Search Console linked, it aims articles at searches the site already appears for but isn't in the top 3 for yet.
 
 ## Site audits
@@ -205,6 +233,10 @@ src/distribution.js  Social posts (Buffer, webhook) and Mailchimp newsletters
 src/seo.js         Rank tracking, indexing watch, title tests, topic plans
 src/webdev.js      Updates, security, form, domain/email and speed checks
 src/capture.js     Page screenshots for visual checks
+src/crawler.js     Lead discovery, website reading, texts and WhatsApp
+src/leads.js       Lead crawlers, outreach sequences, enquiries and proposals
+src/assistant.js   Ask RCWriter and playbooks
+src/telegram.js    Phone alerts
 src/lock.js        App password
 src/codex-install.js  One-click Codex download
 build/installer.nsh   Installer password page

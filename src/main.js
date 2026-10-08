@@ -22,6 +22,10 @@ const { createDistribution } = require('./distribution');
 const { createSeo } = require('./seo');
 const { createWebdev } = require('./webdev');
 const { capture, closeWindow } = require('./capture');
+const { createLeads } = require('./leads');
+const { createCrawler } = require('./crawler');
+const { createAssistant } = require('./assistant');
+const { createTelegram } = require('./telegram');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -51,6 +55,9 @@ let automation = null;
 let distribution = null;
 let seo = null;
 let webdev = null;
+let leads = null;
+let assistant = null;
+let telegram = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
 let locked = false;
@@ -153,6 +160,7 @@ function updateTrayMenu() {
 // ---------------- notifications ----------------
 
 function notify(title, body, onClick) {
+  if (telegram) telegram.alert(title, body);
   if (!Notification.isSupported()) return;
   const n = new Notification({ title, body, icon: ICON });
   liveNotifications.add(n);
@@ -203,6 +211,17 @@ function publicState() {
     indexWatch: (d.indexWatch || []).slice(0, 300),
     titleTests: (d.titleTests || []).slice(0, 200),
     webdevBySite: webdev ? Object.fromEntries(d.sites.map((x) => [x.id, webdev.status(x.id)])) : {},
+    leads: (d.leads || []).slice(0, 3000),
+    campaigns: d.campaigns || [],
+    leadsInfo: { ...(leads ? leads.cfg() : {}), hasPlacesKey: !!(d.leadsKeys && d.leadsKeys.places), sentToday: leads ? leads.sentToday() : 0, usage: leads ? leads.usage() : {},
+      running: (d.campaigns || []).filter((c) => leads && leads.isRunning(c.id)).map((c) => c.id),
+      twilio: { sid: (d.leadsKeys && d.leadsKeys.twilioSid) || '', from: (d.leadsKeys && d.leadsKeys.twilioFrom) || '', hasToken: !!(d.leadsKeys && d.leadsKeys.twilioToken) },
+      whatsapp: { phoneId: (d.leadsKeys && d.leadsKeys.waPhoneId) || '', template: (d.leadsKeys && d.leadsKeys.waTemplate) || '', lang: (d.leadsKeys && d.leadsKeys.waLang) || 'en', params: (d.leadsKeys && d.leadsKeys.waParams) || 1, hasToken: !!(d.leadsKeys && d.leadsKeys.waToken) } },
+    assistantChats: (d.assistantChats || []).slice(0, 12),
+    playbooks: d.playbooks || [],
+    playbookRuns: (d.playbookRuns || []).slice(0, 20),
+    telegram: telegram ? telegram.status() : {},
+    clientHealth: Object.fromEntries((d.clients || []).map((c) => [c.id, clientHealth(c)])),
     assistantAi: assistantChoice(),
     paces: Object.fromEntries(Object.entries(hostGuard.PACES).map(([k, v]) => [k, { label: v.label, gapMs: v.gapMs, auditPerDay: v.auditPerDay }])),
     connectors: d.connectors.map(({ secret, oauthTokens, oauthClient, codeVerifier, oauthState, ...rest }) => ({ ...rest, hasSecret: !!secret, signedIn: rest.auth === 'oauth' ? !!oauthTokens : rest.auth === 'apikey' ? !!secret : true })),
@@ -282,6 +301,31 @@ async function htmlToPdf(html) {
     await closeWindow(w);
     fs.rmSync(file, { force: true });
   }
+}
+
+// A 0-100 score per client from uptime, traffic, rankings, problems, open work and reporting.
+function clientHealth(client) {
+  const d = store.data;
+  const sites = d.sites.filter((x) => x.clientId === client.id && x.type !== 'webhook');
+  if (!sites.length) return null;
+  const parts = [];
+  const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+  const up = avg(sites.map((s) => monitor && monitor.status(s.id)).filter((h) => h && h.uptime24h !== null).map((h) => h.uptime24h));
+  parts.push(['Uptime', 25, up === null ? 18 : up >= 99.9 ? 25 : up >= 99 ? 20 : up >= 95 ? 10 : 0, up === null ? 'not monitored' : `${Math.round(up * 10) / 10}%`]);
+  const tr = avg(sites.map((s) => ((d.monitorState || {})[s.id] || {}).traffic).filter((t) => t && t.changePct !== null && t.changePct !== undefined).map((t) => t.changePct));
+  parts.push(['Traffic', 25, tr === null ? 15 : tr >= 0 ? 25 : tr >= -10 ? 20 : tr >= -30 ? 12 : 4, tr === null ? 'no data' : `${tr > 0 ? '+' : ''}${Math.round(tr)}% week on week`]);
+  const kws = sites.flatMap((s) => seoSummary(s).keywords).filter((k) => k.position !== null);
+  const good = kws.filter((k) => k.position <= 10 || (k.weekAgo && k.position <= k.weekAgo)).length;
+  parts.push(['Rankings', 15, kws.length ? Math.round((good / kws.length) * 15) : 10, kws.length ? `${good}/${kws.length} keywords on page 1 or improving` : 'not tracked']);
+  const probs = sites.reduce((n, s) => { const w = webdev ? webdev.status(s.id) : {}; return n + ((w.security && w.security.findings.length) || 0) + ((w.domain && w.domain.problems && w.domain.problems.length) || 0) + ((((d.monitorState || {})[s.id] || {}).ssl || {}).daysLeft < 14 ? 1 : 0); }, 0);
+  parts.push(['Problems', 10, Math.max(0, 10 - probs * 4), probs ? `${probs} open` : 'none']);
+  const ids = new Set(sites.map((s) => s.id));
+  const work = (d.tasks || []).filter((t) => t.status !== 'done' && t.priority === 'high' && (t.clientId === client.id || ids.has(t.siteId))).length + d.approvals.filter((a) => a.status === 'pending' && ids.has(a.siteId)).length;
+  parts.push(['Open work', 15, Math.max(0, 15 - work * 3), `${work} high-priority tasks and approvals`]);
+  const rep = (d.reports || []).find((r) => r.clientId === client.id && r.kind === 'monthly');
+  const fresh = rep && Date.now() - new Date(rep.createdAt) < 35 * 864e5;
+  parts.push(['Reporting', 10, fresh ? 10 : 4, rep ? `last report ${rep.period}` : 'no report yet']);
+  return { score: parts.reduce((t, p) => t + p[2], 0), parts: parts.map(([name, max, got, note]) => ({ name, max, got, note })) };
 }
 
 function seoSummary(site) {
@@ -486,6 +530,12 @@ async function buildSiteContext(writer) {
 }
 
 async function runSchedule(s) {
+  if (s.kind === 'playbook') {
+    const pb = (store.data.playbooks || []).find((p) => p.id === s.playbookId);
+    if (!pb) { store.log('error', `Schedule "${s.name}" points to a playbook that no longer exists.`); store.save(); return; }
+    try { await assistant.runPlaybook(pb); } catch (e) { store.log('error', `Playbook "${pb.name}" failed: ${e.message}`); store.save(); if (store.data.settings.notifyOnFailure) notify('Playbook failed', `${pb.name}: ${e.message}`.slice(0, 250)); }
+    return;
+  }
   if (s.kind === 'audit') {
     const job = store.data.auditJobs.find((j) => j.id === s.jobId);
     if (!job) { store.log('error', `Schedule "${s.name}" points to an audit that no longer exists.`); store.save(); return; }
@@ -690,6 +740,8 @@ function registerIpc() {
     d.images = { model: (d.images && d.images.model) || 'gpt-image-1' };
     d.googleUser = { clientId: (d.googleUser && d.googleUser.clientId) || '' };
     d.distribution = { webhookUrl: (d.distribution && d.distribution.webhookUrl) || '' };
+    d.leadsKeys = {};
+    d.telegram = {};
     for (const c of d.connectors) {
       delete c.oauthTokens; delete c.oauthClient; delete c.codeVerifier; c.secret = null;
       c.lastError = 'Sign in again. Saved sign-ins were erased when the password was reset.';
@@ -1281,6 +1333,141 @@ function registerIpc() {
     webdev.runUpdates(s, slugs).catch((e) => win?.webContents.send('toast', { msg: e.message, kind: 'error' }));
     return true;
   });
+  // ---------- Release 4b: leads, assistant, playbooks, Telegram ----------
+  const leadById = (id) => { const l = (store.data.leads || []).find((x) => x.id === id); if (!l) throw new Error('Lead not found.'); return l; };
+  const campById = (id) => { const c = (store.data.campaigns || []).find((x) => x.id === id); if (!c) throw new Error('Campaign not found.'); return c; };
+  handle('leads:setKey', (key) => { const d = store.data; d.leadsKeys = d.leadsKeys || {}; d.leadsKeys.places = key ? store.encrypt(String(key).trim()) : null; store.save(); broadcast(); });
+  handle('campaign:save', (c = {}) => {
+    const d = store.data;
+    d.campaigns = d.campaigns || [];
+    if (!String(c.name || '').trim() || !String(c.niche || '').trim() || !String(c.location || '').trim()) throw new Error('Give the campaign a name, a type of business and a location.');
+    let camp = c.id && d.campaigns.find((x) => x.id === c.id);
+    if (!camp) { camp = { id: store.uid(), status: 'paused', createdAt: new Date().toISOString() }; d.campaigns.push(camp); }
+    const num = (v, lo, hi, def) => Math.max(lo, Math.min(hi, Number(v) || def));
+    Object.assign(camp, { name: c.name.trim(), niche: c.niche.trim(), location: c.location.trim(), countryCode: String(c.countryCode || '').replace(/[^\d+]/g, ''), offer: String(c.offer || '').trim(),
+      sources: (c.sources || ['osm']).filter((x) => ['osm', 'places', 'ai'].includes(x)), maxPerRun: num(c.maxPerRun, 1, 500, 25), maxTotal: Math.max(0, Number(c.maxTotal) || 0), pagesPerSite: num(c.pagesPerSite, 1, 8, 3),
+      require: ['any', 'email', 'phone', 'either'].includes(c.require) ? c.require : 'any', speedCheck: c.speedCheck !== false, schedule: c.schedule || { type: 'manual' },
+      steps: (c.steps || []).map((x) => ({ day: Math.max(0, Number(x.day) || 0) })).slice(0, 5), mode: c.mode === 'auto' ? 'auto' : 'approve', emailOn: c.emailOn !== false, outreach: c.outreach !== false,
+      sms: { enabled: !!(c.sms && c.sms.enabled), mode: c.sms && c.sms.mode === 'auto' ? 'auto' : 'approve', afterDay: Number(c.sms && c.sms.afterDay) || 0, ack: !!(c.sms && c.sms.ack) },
+      whatsapp: { enabled: !!(c.whatsapp && c.whatsapp.enabled), mode: c.whatsapp && c.whatsapp.mode === 'auto' ? 'auto' : 'manual', afterDay: Number(c.whatsapp && c.whatsapp.afterDay) || 0, ack: !!(c.whatsapp && c.whatsapp.ack) } });
+    store.save();
+    broadcast();
+    return camp.id;
+  });
+  handle('campaign:delete', (id) => { const d = store.data; d.campaigns = (d.campaigns || []).filter((x) => x.id !== id); store.save(); broadcast(); });
+  handle('campaign:status', (id, status) => { campById(id).status = status === 'active' ? 'active' : 'paused'; store.save(); broadcast(); });
+  handle('campaign:find', (id) => {
+    const c = campById(id);
+    leads.runCrawler(c, { manual: true }).catch((e) => win?.webContents.send('toast', { msg: e.message, kind: 'error' })).finally(broadcast);
+    broadcast();
+    return true;
+  });
+  handle('campaign:stop', (id) => { campById(id).stopRequested = true; broadcast(); });
+  handle('campaign:outreachNow', async (id) => { try { await leads.outreach(campById(id)); } finally { broadcast(); } });
+  handle('lead:approveSms', async (id, text) => { try { return await leads.approveSms(id, text); } finally { broadcast(); } });
+  handle('lead:discardSms', (id) => { delete leadById(id).pendingSms; store.save(); broadcast(); });
+  handle('lead:export', async (campaignId) => {
+    const r = await dialog.showSaveDialog(win, { title: 'Export leads', defaultPath: path.join(app.getPath('documents'), `leads-${new Date().toISOString().slice(0, 10)}.csv`), filters: [{ name: 'CSV', extensions: ['csv'] }] });
+    if (r.canceled || !r.filePath) return null;
+    fs.writeFileSync(r.filePath, `\ufeff${leads.exportCsv(campaignId || '')}`, 'utf8');
+    shell.showItemInFolder(r.filePath);
+    return r.filePath;
+  });
+  handle('leads:setKeys', (k = {}) => {
+    const d = store.data;
+    d.leadsKeys = d.leadsKeys || {};
+    for (const f of ['twilioToken', 'waToken']) if (k[f] !== undefined && k[f] !== '') d.leadsKeys[f] = store.encrypt(String(k[f]).trim());
+    for (const f of ['twilioSid', 'twilioFrom', 'waPhoneId', 'waTemplate', 'waLang']) if (k[f] !== undefined) d.leadsKeys[f] = String(k[f]).trim();
+    if (k.waParams !== undefined) d.leadsKeys.waParams = Math.max(0, Math.min(2, Number(k.waParams) || 0));
+    if (k.clearTwilio) { delete d.leadsKeys.twilioToken; delete d.leadsKeys.twilioSid; delete d.leadsKeys.twilioFrom; }
+    if (k.clearWa) { delete d.leadsKeys.waToken; delete d.leadsKeys.waPhoneId; delete d.leadsKeys.waTemplate; }
+    store.save();
+    broadcast();
+  });
+  handle('lead:add', (l = {}) => {
+    const d = store.data;
+    d.leads = d.leads || [];
+    if (!String(l.name || '').trim()) throw new Error('Give the lead a name.');
+    const lead = { id: store.uid(), source: 'manual', stage: 'new', step: 0, createdAt: new Date().toISOString(), name: l.name.trim(), website: String(l.website || '').trim(), email: String(l.email || '').trim().toLowerCase(), phone: String(l.phone || '').trim(), campaignId: l.campaignId || '', notes: l.notes || '' };
+    lead.domain = require('./leads').domainOf(lead.website);
+    d.leads.unshift(lead);
+    store.save();
+    broadcast();
+    leads.enrich(lead).catch(() => {}).finally(broadcast);
+    return lead.id;
+  });
+  handle('lead:update', (id, patch = {}) => { const l = leadById(id); for (const k of ['stage', 'email', 'phone', 'notes', 'myNotes', 'nextAction', 'campaignId', 'name', 'website']) if (k in patch) l[k] = patch[k]; if (patch.stage === 'lost') l.optedOut = !!patch.optedOut || l.optedOut; store.save(); broadcast(); });
+  handle('lead:delete', (ids) => { const set = new Set([].concat(ids)); store.data.leads = (store.data.leads || []).filter((x) => !set.has(x.id)); store.save(); broadcast(); });
+  handle('lead:enrich', async (id) => { try { return await leads.enrich(leadById(id)); } finally { broadcast(); } });
+  handle('lead:writeEmail', async (id) => {
+    const l = leadById(id);
+    if (!l.email) throw new Error('This lead has no email address yet.');
+    const camp = (store.data.campaigns || []).find((c) => c.id === l.campaignId) || { mode: 'approve', offer: '' };
+    try { return await leads.sendStep(l, { ...camp, mode: 'approve' }, l.stage === 'contacted' ? l.step : 0); } finally { broadcast(); }
+  });
+  handle('lead:approveEmail', async (id, edits) => { try { return await leads.approvePending(id, edits || {}); } finally { broadcast(); } });
+  handle('lead:discardEmail', (id) => { delete leadById(id).pendingEmail; store.save(); broadcast(); });
+  handle('lead:whatsapp', async (id) => {
+    const l = leadById(id);
+    if (!l.phone) throw new Error('This lead has no phone number.');
+    const camp = (store.data.campaigns || []).find((c) => c.id === l.campaignId);
+    const w = l.whatsapp || await leads.whatsappMessage(l, camp);
+    shell.openExternal(w.url);
+    l.whatsapp.openedAt = new Date().toISOString();
+    l.history = [...(l.history || []), { at: l.whatsapp.openedAt, type: 'whatsapp' }];
+    if (l.stage === 'new') { l.stage = 'contacted'; l.contactedAt = l.contactedAt || l.whatsapp.openedAt; }
+    store.save();
+    broadcast();
+    return w;
+  });
+  handle('lead:proposal', async (opts) => {
+    try {
+      const r = await leads.proposal(opts || {});
+      shell.openPath(r.files.pdf || r.files.docx);
+      return r;
+    } finally { broadcast(); }
+  });
+  handle('lead:checkReplies', async () => { try { return await leads.checkReplies(); } finally { broadcast(); } });
+  handle('assistant:ask', async (text) => {
+    if (!String(text || '').trim()) throw new Error('Type a request first.');
+    return assistant.ask(String(text).trim());
+  });
+  handle('assistant:clear', () => { store.data.assistantChats = []; store.save(); broadcast(); });
+  function syncPlaybookSchedule(pb) {
+    const d = store.data;
+    const id = `playbook-${pb.id}`;
+    const sch = pb.schedule || {};
+    if (!sch.type || sch.type === 'manual') { d.schedules = d.schedules.filter((x) => x.id !== id); return; }
+    let s = d.schedules.find((x) => x.id === id);
+    if (!s) { s = { id, kind: 'playbook', createdAt: new Date().toISOString() }; d.schedules.push(s); }
+    Object.assign(s, { kind: 'playbook', playbookId: pb.id, name: pb.name, enabled: pb.enabled !== false, type: sch.type, time: sch.time || '08:00', days: sch.days || [1], intervalHours: Number(sch.intervalHours) || 24, reminders: [], lastRunAt: s.lastRunAt || null });
+    scheduler.reset(s);
+  }
+  handle('playbook:save', (pb = {}) => {
+    const d = store.data;
+    d.playbooks = d.playbooks || [];
+    if (!String(pb.name || '').trim() || !String(pb.steps || '').trim()) throw new Error('Give the playbook a name and at least one step.');
+    let p = pb.id && d.playbooks.find((x) => x.id === pb.id);
+    if (!p) { p = { id: store.uid(), createdAt: new Date().toISOString(), enabled: true }; d.playbooks.push(p); }
+    Object.assign(p, { name: pb.name.trim(), steps: pb.steps.trim(), schedule: pb.schedule || { type: 'manual' } });
+    syncPlaybookSchedule(p);
+    scheduler.tick();
+    store.save();
+    broadcast();
+    return p.id;
+  });
+  handle('playbook:toggle', (id, on) => { const p = (store.data.playbooks || []).find((x) => x.id === id); if (p) { p.enabled = !!on; syncPlaybookSchedule(p); store.save(); broadcast(); } });
+  handle('playbook:delete', (id) => { const d = store.data; d.playbooks = (d.playbooks || []).filter((x) => x.id !== id); d.schedules = d.schedules.filter((x) => x.id !== `playbook-${id}`); store.save(); broadcast(); });
+  handle('playbook:run', (id) => {
+    const p = (store.data.playbooks || []).find((x) => x.id === id);
+    if (!p) throw new Error('Playbook not found.');
+    assistant.runPlaybook(p).catch((e) => win?.webContents.send('toast', { msg: `Playbook failed: ${e.message}`, kind: 'error' })).finally(broadcast);
+    return true;
+  });
+  handle('tg:setToken', async (t) => { try { return await telegram.setToken(t); } finally { broadcast(); } });
+  handle('tg:findChat', async () => { try { return await telegram.findChat(); } finally { broadcast(); } });
+  handle('tg:test', () => telegram.send('Test from RCWriter: alerts are working.'));
+  handle('tg:set', (patch = {}) => { const c = store.data.telegram || (store.data.telegram = {}); if ('enabled' in patch) c.enabled = !!patch.enabled; if ('level' in patch) c.level = patch.level === 'all' ? 'all' : 'important'; store.save(); broadcast(); });
   handle('images:set', (cfg = {}) => {
     const d = store.data;
     d.images = d.images || {};
@@ -1351,7 +1538,26 @@ if (gotLock) {
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     webdev = createWebdev({ store, google, onChange: broadcast, addTask: (t) => automation.addTask(t), capture, connectors: connectorMgr, auditor,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
-    setInterval(() => { try { seo.tick(); webdev.tick(); } catch (e) { console.error(e); } }, 60000);
+    telegram = createTelegram({ store });
+    const crawler = createCrawler({ store, providers, ai: assistantAi, assistantChoice });
+    leads = createLeads({ store, ai: assistantAi, guser, google, htmlToPdf, onChange: broadcast, addTask: (t) => automation.addTask(t), crawler,
+      notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
+    assistant = createAssistant({
+      store, auditor, builtins, assistantChoice, onChange: broadcast,
+      notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
+      actions: {
+        runAudit: (job, note) => auditor.runJob(job, { context: note ? `Requested through Ask RCWriter: ${note}` : '' }).catch((e) => store.log('error', `Audit "${job.name}" could not start: ${e.message}`)),
+        runWriter: (id, topic) => runWriter(id, { topic }).catch(() => {}),
+        addTask: (t) => automation.addTask(t),
+        monthlyReport: (id, offset) => automation.monthlyReport((store.data.clients || []).find((c) => c.id === id), { offset }),
+        weeklyUpdate: (id) => automation.weeklyUpdate((store.data.clients || []).find((c) => c.id === id), { manual: true }),
+        rankings: (siteId) => seoSummary(store.data.sites.find((s) => s.id === siteId)).keywords.map(({ history, ...k }) => k),
+        siteHealth: (siteId) => ({ monitoring: monitor.status(siteId), maintenance: webdev.status(siteId) }),
+        findLeads: (campId) => leads.findLeads((store.data.campaigns || []).find((c) => c.id === campId)),
+        runDigest: () => automation.runDigest({ manual: true })
+      }
+    });
+    setInterval(() => { try { seo.tick(); webdev.tick(); leads.tick(); } catch (e) { console.error(e); } }, 60000);
     setTimeout(() => { try { seo.tick(); webdev.tick(); } catch { /* next minute */ } }, 45000);
     automation.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }

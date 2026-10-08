@@ -108,6 +108,11 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
           description: `[${src.name}, ${label}] ${t.description}`.slice(0, 1024) });
       }
     }
+    for (const t of job.extraTools || []) {
+      const exposed = `app__${t.name}`.slice(0, 64);
+      used.add(exposed);
+      out.push({ exposed, conn: { id: 'app', name: 'RCWriter' }, tool: t.name, risk: 'read', write: false, schema: t.inputSchema, run: t.run, description: `[RCWriter] ${t.description}`.slice(0, 1024) });
+    }
     for (const cid of job.connectorIds || []) {
       const conn = d().connectors.find((c) => c.id === cid);
       if (!conn) continue;
@@ -496,9 +501,9 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
 
   // Read-only research with the same tools and engines, used by writers to pick
   // keywords. Nothing is recorded as an audit run. Returns the AI's final text.
-  async function research({ name, siteId, siteUrl, connectorIds = [], builtinKinds = ['google'], provider, model, system, task, maxToolCalls = 20, maxMinutes = 15 }) {
+  async function research({ name, siteId, siteUrl, connectorIds = [], builtinKinds = ['google'], provider, model, system, task, maxToolCalls = 20, maxMinutes = 15, extraTools = [], requireTools = true }) {
     const job = { id: `research-${uid()}`, kind: 'research', name, siteId, siteUrl, connectorIds, builtins: builtinKinds, provider, model, mode: 'report',
-      maxToolCalls, maxChanges: 0, maxMinutes, systemOverride: system, task };
+      maxToolCalls, maxChanges: 0, maxMinutes, systemOverride: system, task, extraTools };
     const rec = { id: uid(), kind: 'research', jobId: job.id, jobName: name, toolCalls: 0, applied: 0, queued: 0, blocked: 0, failed: 0, startedAt: new Date().toISOString() };
     const run = { rec, job, token: crypto.randomBytes(24).toString('hex'), notes: [], tools: [], stopped: false, child: null };
     runs.set(rec.id, run);
@@ -506,7 +511,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       run.tools = (await buildToolset(job, run)).filter((t) => !t.write);
       if (!run.tools.length) throw new Error(run.notes[0] || 'No research tools are available. Connect Ahrefs or Semrush, or link Search Console to the website.');
       const text = provider === 'chatgpt' ? await runCodex(run) : await runApi(run);
-      if (!rec.toolCalls) throw new Error("The AI didn't use any research tools.");
+      if (!rec.toolCalls && requireTools) throw new Error("The AI didn't use any research tools.");
       return { text, toolCalls: rec.toolCalls, notes: run.notes };
     } finally {
       runs.delete(rec.id);

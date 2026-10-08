@@ -75,7 +75,7 @@ function viewClients() {
     return `
       <div class="row writer-row top">
         <div>
-          <div class="title">${esc(c.name)}</div>
+          <div class="title">${esc(c.name)} ${window.healthChip ? window.healthChip(c.id) : ''}</div>
           ${c.contact || c.email ? `<div class="meta">${esc(c.contact)}${c.contact && c.email ? ', ' : ''}${esc(c.email)}</div>` : ''}
           <div class="client-sites">${sites.map((x) => `<div>${healthDot(x.monitor && x.monitor.enabled ? x.health : null)}<strong>${esc(x.name)}</strong> <span class="muted small">${esc(healthText(x))}</span></div>`).join('') || '<span class="muted small">No websites yet. Edit the client to add them.</span>'}</div>
           <div class="meta">${writers.length} writer${writers.length === 1 ? '' : 's'}, ${articles} article${articles === 1 ? '' : 's'} this month · ${jobs.length} audit${jobs.length === 1 ? '' : 's'}${lastRun ? `, last ${fmtRel(lastRun.finishedAt || lastRun.startedAt)}` : ''}${pending ? ` · <strong>${pending} waiting for approval</strong>` : ''}</div>

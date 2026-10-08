@@ -92,6 +92,7 @@ function createScheduler({ store, runSchedule, notify, onChange }) {
       if (!s.nextRunAt) continue;
       const due = new Date(s.nextRunAt);
       const isAudit = s.kind === 'audit';
+      if (s.kind === 'playbook') s.reminders = [];
       const writer = isAudit ? (d.auditJobs || []).find((j) => j.id === s.jobId) : d.writers.find((w) => w.id === s.writerId);
 
       // Reminders before the run
@@ -172,7 +173,7 @@ function createScheduler({ store, runSchedule, notify, onChange }) {
       }
       for (const t of occ) {
         if (t.getTime() > horizon) break;
-        items.push({ kind: 'run', type: isAudit ? 'audit' : 'article', at: t.toISOString(), scheduleId: s.id, scheduleName: s.name, writerName: writer ? (isAudit ? writer.siteUrl || writer.name : writer.name) : 'Missing', mode: isAudit && writer ? writer.mode : null, count: s.count || 1 });
+        items.push({ kind: 'run', type: s.kind === 'playbook' ? 'playbook' : isAudit ? 'audit' : 'article', at: t.toISOString(), scheduleId: s.id, scheduleName: s.name, writerName: s.kind === 'playbook' ? 'Playbook' : writer ? (isAudit ? writer.siteUrl || writer.name : writer.name) : 'Missing', mode: isAudit && writer ? writer.mode : null, count: s.count || 1 });
         for (const r of s.reminders || []) {
           const ra = t.getTime() - Number(r) * MIN;
           if (ra >= now.getTime() && ra <= horizon) {

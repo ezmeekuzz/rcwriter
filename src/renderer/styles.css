@@ -337,3 +337,38 @@ ul.plan li.done span:first-child { text-decoration: line-through; color: var(--i
 .maint-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px 22px; }
 .maint-grid h4, .panel h4 { margin: 12px 0 4px; font-size: 13.5px; }
 .maint-grid p { margin: 2px 0 6px; }
+
+/* 2.0: leads, assistant, playbooks */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; }
+.toolbar select { width: auto; }
+.lead-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.lead-col { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 10px; min-height: 120px; }
+.lead-col h4 { margin: 2px 4px 10px; font-size: 13px; }
+.lead-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px; margin-bottom: 8px; font-size: 13px; }
+.lead-card .lc-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.lead-card .lc-head a { color: inherit; text-decoration: none; }
+.lead-card .lc-actions { margin-top: 8px; flex-wrap: wrap; gap: 6px; }
+.lead-card select.small { width: auto; font-size: 12px; padding: 2px 6px; }
+.pending-email { margin: 8px 0; padding: 8px; border-left: 3px solid var(--marigold); background: var(--marigold-wash); border-radius: 4px; }
+.pending-email pre, .row pre { white-space: pre-wrap; font: 12.5px/1.45 var(--ui); margin: 6px 0; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); }
+table.leads-table td { vertical-align: top; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: var(--surface-2); }
+table.kvtable { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-bottom: 8px; }
+table.kvtable th { text-align: left; width: 170px; color: var(--ink-soft); font-weight: 500; padding: 5px 10px 5px 0; vertical-align: top; }
+table.kvtable td { padding: 5px 0; border-bottom: 1px solid var(--line); }
+.panel.ask { padding-top: 14px; }
+.ask-form { display: flex; gap: 8px; }
+.ask-form input { flex: 1; }
+.ask-item { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ask-q { font-weight: 600; font-size: 13.5px; }
+.ask-a { font-size: 13.5px; }
+.ask-a p { margin: 4px 0; }
+.health { display: inline-block; min-width: 30px; text-align: center; padding: 1px 7px; border-radius: 999px; font-size: 12px; font-weight: 700; cursor: help; vertical-align: 2px; }
+.health.good { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.health.mid { background: var(--marigold-wash); color: var(--marigold-text); }
+.health.bad { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+.sidebar { min-height: 0; }
+#nav { flex: 1; min-height: 0; overflow-y: auto; }
+#nav > * { flex-shrink: 0; }

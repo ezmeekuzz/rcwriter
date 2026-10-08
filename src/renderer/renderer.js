@@ -118,6 +118,15 @@ function renderSidebar() {
     if (b.dataset.view === 'today') {
       b.innerHTML = `Today${S.jobs.length ? `<span class="badge">${S.jobs.length} writing</span>` : ''}`;
     }
+    if (b.dataset.view === 'leads') {
+      const n = (S.leads || []).filter((l) => l.pendingEmail || l.pendingSms).length;
+      const r = (S.leads || []).filter((l) => l.stage === 'replied').length;
+      b.innerHTML = `Leads${n ? `<span class="badge">${n} to approve</span>` : r ? `<span class="badge">${r} replied</span>` : ''}`;
+    }
+    if (b.dataset.view === 'campaigns') {
+      const n = ((S.leadsInfo || {}).running || []).length;
+      b.innerHTML = `Crawlers${n ? '<span class="badge">running</span>' : ''}`;
+    }
     if (b.dataset.view === 'tasks') {
       const today = new Date().toLocaleDateString('en-CA');
       const due = (S.tasks || []).filter((t) => t.status !== 'done' && t.due && t.due <= today).length;
@@ -130,7 +139,7 @@ function renderSidebar() {
     }
   });
   if (window.renderClientPick) window.renderClientPick();
-  const active = S.schedules.filter((s) => s.enabled && s.kind !== 'audit').length + S.auditJobs.filter((j) => j.enabled !== false && S.schedules.some((s) => s.id === `audit-${j.id}`)).length;
+  const active = S.schedules.filter((s) => s.enabled && !s.kind).length + S.schedules.filter((s) => s.enabled && s.kind === 'playbook').length + S.auditJobs.filter((j) => j.enabled !== false && S.schedules.some((s) => s.id === `audit-${j.id}`)).length;
   const paused = S.settings.paused;
   document.getElementById('status').innerHTML = `
     <div><span class="dot ${paused ? 'paused' : ''}"></span>${paused ? 'Schedules paused' : `${active} schedule${active === 1 ? '' : 's'} on`}</div>
@@ -313,7 +322,7 @@ function viewToday() {
     <div class="panel attention" style="max-width:none"><h3>${pendingCount} site change${pendingCount > 1 ? 's' : ''} waiting for your approval</h3><button class="btn primary" data-action="goto-approvals">Review changes</button></div>` : '';
 
   const list = events.slice(0, 14).map((e) => e.kind === 'run'
-    ? `<li><time>${fmtDay(e.at) === 'Today' ? '' : fmtDay(e.at) + ' '}${fmtTime(e.at)}</time><div><strong>${esc(e.scheduleName)}</strong><div class="muted small">${e.type === 'audit' ? `Site audit of ${esc(e.writerName)}${e.mode === 'full' ? ', applies changes automatically' : ''}` : `${esc(e.writerName)} writes ${e.count > 1 ? `${e.count} articles` : 'an article'}`}</div></div></li>`
+    ? `<li><time>${fmtDay(e.at) === 'Today' ? '' : fmtDay(e.at) + ' '}${fmtTime(e.at)}</time><div><strong>${esc(e.scheduleName)}</strong><div class="muted small">${e.type === 'playbook' ? 'Runs the playbook' : e.type === 'audit' ? `Site audit of ${esc(e.writerName)}${e.mode === 'full' ? ', applies changes automatically' : ''}` : `${esc(e.writerName)} writes ${e.count > 1 ? `${e.count} articles` : 'an article'}`}</div></div></li>`
     : `<li><time>${fmtDay(e.at) === 'Today' ? '' : fmtDay(e.at) + ' '}${fmtTime(e.at)}</time><div class="reminder-line">Reminder: "${esc(e.scheduleName)}" in ${esc(fmtMinutes(e.minutes).replace(' before', ''))}</div></li>`).join('');
 
   const activity = S.activity.slice(0, 14).map((a) => `
@@ -381,7 +390,7 @@ function viewWriters() {
 
 // ---------- Schedules ----------
 function viewSchedules() {
-  const rows = S.schedules.filter((s) => s.kind !== 'audit' && inClient(writerSite(s.writerId))).map((s) => `
+  const rows = S.schedules.filter((s) => !s.kind && inClient(writerSite(s.writerId))).map((s) => `
     <div class="row schedule-row">
       <label class="switch" title="${s.enabled ? 'Turn off' : 'Turn on'}"><input type="checkbox" data-change="toggle-schedule" data-id="${s.id}" ${s.enabled ? 'checked' : ''} aria-label="Schedule ${esc(s.name)} on"><span></span></label>
       <div>
