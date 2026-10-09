@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('api', {
   openOutputDir: () => invoke('app:openOutputDir'),
   testNotification: () => invoke('notify:test'),
   openLink: (url) => invoke('link:open', url),
+  dismissUpdate: () => invoke('update:dismiss'),
+  dismissAnnounce: () => invoke('announce:dismiss'),
 
   setProvider: (id, cfg) => invoke('provider:set', id, cfg),
   listModels: (id, refresh) => invoke('provider:models', id, refresh),

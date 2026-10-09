@@ -31,6 +31,7 @@ const { createCrawler } = require('./crawler');
 const { createAssistant } = require('./assistant');
 const { createTelegram } = require('./telegram');
 const { createTelemetry } = require('./telemetry');
+const { createUpdates } = require('./updates');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -75,6 +76,7 @@ let leads = null;
 let assistant = null;
 let telegram = null;
 let telemetry = null;
+let updates = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
 let locked = false;
@@ -301,7 +303,8 @@ function publicState() {
     tampered,
     owner: ownership.OWNER,
     website: ownership.WEBSITE,
-    telemetry: telemetry ? telemetry.status() : { configured: false, enabled: true }
+    telemetry: telemetry ? telemetry.status() : { configured: false, enabled: true },
+    ...(updates ? updates.status() : { update: null, announce: null })
   };
 }
 
@@ -940,6 +943,8 @@ function registerIpc() {
     if (a) return shell.openPath(a.path);
   });
   handle('link:open', (url) => { if (/^https?:\/\//.test(url)) shell.openExternal(url); });
+  handle('update:dismiss', () => { if (updates) updates.dismissUpdate(); });
+  handle('announce:dismiss', () => { if (updates) updates.dismissAnnounce(); });
 
   // ChatGPT subscription (via the official Codex CLI)
   const saveSub = (st) => { store.data.subscription.chatgpt = st; store.save(); broadcast(); return st; };
@@ -1603,6 +1608,9 @@ if (gotLock) {
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     telegram = createTelegram({ store });
     telemetry.start();
+    updates = createUpdates({ store, currentVersion: app.getVersion(), onChange: broadcast });
+    setTimeout(() => updates.check(), 10 * 1000);
+    setInterval(() => updates.check(), 6 * 60 * 60 * 1000);
     const crawler = createCrawler({ store, providers, ai: assistantAi, assistantChoice });
     leads = createLeads({ store, ai: assistantAi, guser, google, htmlToPdf, onChange: broadcast, addTask: (t) => automation.addTask(t), crawler,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });

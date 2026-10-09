@@ -110,9 +110,22 @@ function render() {
   }
   renderSidebar();
   const scroll = main.scrollTop;
-  main.innerHTML = VIEWS[view]();
+  main.innerHTML = banners() + VIEWS[view]();
   main.scrollTop = scroll;
   if (view === 'articles') loadReader();
+}
+
+function banners() {
+  let h = '';
+  const a = S.announce;
+  if (a && a.message) {
+    h += `<div class="app-banner announce"><div class="app-banner-text">${esc(a.message)}</div><div class="app-banner-actions">${a.url ? `<button class="btn small" data-action="link" data-url="${esc(a.url)}">Learn more</button>` : ''}<button class="btn ghost small" data-action="dismiss-announce">Dismiss</button></div></div>`;
+  }
+  const u = S.update;
+  if (u && u.version) {
+    h += `<div class="app-banner update"><div class="app-banner-text"><strong>RCWriter ${esc(u.version)} is available.</strong>${u.notes ? ` ${esc(u.notes)}` : ''}</div><div class="app-banner-actions">${u.url ? `<button class="btn primary small" data-action="link" data-url="${esc(u.url)}">Download</button>` : ''}<button class="btn ghost small" data-action="dismiss-update">Not now</button></div></div>`;
+  }
+  return h;
 }
 
 function renderSidebar() {
@@ -1227,6 +1240,8 @@ const ACTIONS = {
     catch (e) { toast(cleanErr(e), 'error'); el.disabled = false; }
   },
 
+  'dismiss-update': () => api.dismissUpdate(),
+  'dismiss-announce': () => api.dismissAnnounce(),
   'goto-approvals': () => { view = 'audits'; window.auditGoto && window.auditGoto('approvals'); render(); },
   'open-audit-report': (el) => window.openAuditReport(el.dataset.id),
   'close-modal': () => closeModal(),
