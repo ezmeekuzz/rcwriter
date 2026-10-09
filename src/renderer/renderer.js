@@ -129,6 +129,8 @@ function banners() {
 }
 
 function renderSidebar() {
+  const bv = document.getElementById('brand-ver');
+  if (bv) bv.textContent = S.version ? `v${S.version}` : '';
   document.querySelectorAll('#nav button').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === view);
     if (b.dataset.view === 'today') {
@@ -286,6 +288,7 @@ function lockScreen() {
       </form>
       <button class="btn ghost small" data-action="forgot-password">Forgot password?</button>
       ${OWNER_LINE}
+      <p class="muted small gate-ver">v${esc(S.version || '')}</p>
     </div>`;
 }
 
@@ -304,6 +307,7 @@ function setupScreen() {
       </form>
       <button class="btn ghost small" data-action="skip-password">Skip for now</button>
       ${OWNER_LINE}
+      <p class="muted small gate-ver">v${esc(S.version || '')}</p>
     </div>`;
 }
 

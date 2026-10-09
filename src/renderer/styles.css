@@ -53,6 +53,8 @@ body {
 /* Sidebar */
 .sidebar { display: flex; flex-direction: column; padding: 18px 12px; border-right: 1px solid var(--line); background: var(--surface-2); }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 22px; font: 600 17px/1 var(--display); letter-spacing: .01em; }
+.brand-ver { margin-left: auto; font: 500 11px/1 var(--ui); color: var(--ink-soft); letter-spacing: 0; }
+.gate-ver { margin-top: 10px; opacity: .7; }
 .brand img { border-radius: 7px; }
 #nav { display: flex; flex-direction: column; gap: 2px; }
 #nav button {
