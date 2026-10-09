@@ -618,6 +618,11 @@ function viewSettings() {
       <p class="muted small">RCWriter ${esc(S.version)}</p>
     </section>
     <section class="panel">
+      <h3>Usage statistics</h3>
+      <label class="check"><input type="checkbox" data-setting="telemetry" ${s.telemetry !== false ? 'checked' : ''}><span><strong>Help improve RCWriter by sending anonymous usage statistics</strong><br><span class="muted small">Sends only an anonymous signal that the app was opened, so the owner can see how many people use RCWriter and how many are active. No names, emails, API keys, website data or article content are ever sent. Turn this off any time.</span></span></label>
+      ${S.telemetry && !S.telemetry.configured ? '<p class="muted small">Not active in this copy yet.</p>' : ''}
+    </section>
+    <section class="panel">
       <h3>About</h3>
       <p><strong>RCWriter</strong> is created and owned by <strong>Rustom Codilan</strong>.</p>
       <p class="small"><a href="#" data-action="link" data-url="https://tomdigitalspace.com/">tomdigitalspace.com</a></p>

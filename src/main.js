@@ -30,6 +30,7 @@ const { createLeads } = require('./leads');
 const { createCrawler } = require('./crawler');
 const { createAssistant } = require('./assistant');
 const { createTelegram } = require('./telegram');
+const { createTelemetry } = require('./telemetry');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -73,6 +74,7 @@ let webdev = null;
 let leads = null;
 let assistant = null;
 let telegram = null;
+let telemetry = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
 let locked = false;
@@ -298,7 +300,8 @@ function publicState() {
     platform: process.platform,
     tampered,
     owner: ownership.OWNER,
-    website: ownership.WEBSITE
+    website: ownership.WEBSITE,
+    telemetry: telemetry ? telemetry.status() : { configured: false, enabled: true }
   };
 }
 
@@ -318,6 +321,7 @@ function applySettings(patch) {
     if (!s.keepAwake && blockerId !== null) { powerSaveBlocker.stop(blockerId); blockerId = null; }
   }
   if ('catchUpWindowHours' in patch) s.catchUpWindowHours = Math.max(0, Number(s.catchUpWindowHours) || 0);
+  if ('telemetry' in patch && telemetry) telemetry.refresh();
   delete s.__init;
   store.save();
   broadcast();
@@ -1592,6 +1596,8 @@ if (gotLock) {
     webdev = createWebdev({ store, google, onChange: broadcast, addTask: (t) => automation.addTask(t), capture, connectors: connectorMgr, auditor,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     telegram = createTelegram({ store });
+    telemetry = createTelemetry({ store });
+    telemetry.start();
     const crawler = createCrawler({ store, providers, ai: assistantAi, assistantChoice });
     leads = createLeads({ store, ai: assistantAi, guser, google, htmlToPdf, onChange: broadcast, addTask: (t) => automation.addTask(t), crawler,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
