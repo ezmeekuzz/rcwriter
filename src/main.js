@@ -1542,6 +1542,12 @@ if (gotLock) {
     if (link) handleDeepLink(link); else showWindow();
   });
 
+  // Must run BEFORE the app is ready: the Aptabase SDK disables itself if
+  // initialized after ready. This only sets the SDK up; no event is sent until
+  // an allowed track() call once settings are loaded below.
+  telemetry = createTelemetry({ store });
+  telemetry.initEarly();
+
   app.whenReady().then(() => {
     store.load();
     hostGuard.init(store);
@@ -1596,7 +1602,6 @@ if (gotLock) {
     webdev = createWebdev({ store, google, onChange: broadcast, addTask: (t) => automation.addTask(t), capture, connectors: connectorMgr, auditor,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     telegram = createTelegram({ store });
-    telemetry = createTelemetry({ store });
     telemetry.start();
     const crawler = createCrawler({ store, providers, ai: assistantAi, assistantChoice });
     leads = createLeads({ store, ai: assistantAi, guser, google, htmlToPdf, onChange: broadcast, addTask: (t) => automation.addTask(t), crawler,

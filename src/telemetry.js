@@ -34,6 +34,18 @@ function createTelemetry({ store }) {
     return sdk;
   }
 
+  // The Aptabase SDK DISABLES itself if initialize() runs after the app is
+  // ready, so this must be called before app.whenReady(). It only sets the SDK
+  // up and sends nothing by itself — events are sent later by track(), and only
+  // when the user hasn't opted out. So initialising early is privacy-safe: no
+  // network request happens until an allowed track() call.
+  function initEarly() {
+    if (initialised || !configured()) return;
+    const a = load();
+    if (!a) return;
+    try { a.initialize(APTABASE_KEY); initialised = true; } catch { /* ignore */ }
+  }
+
   function track(name, props) {
     if (!allowed()) return;
     const a = load();
@@ -49,12 +61,11 @@ function createTelemetry({ store }) {
     if (dayTimer.unref) dayTimer.unref();
   }
 
-  // Called at startup and whenever the setting changes.
+  // Called after settings are loaded (app already ready). Does NOT initialise —
+  // that must have happened earlier via initEarly(); it only sends events, and
+  // only when allowed. Buffered events flush once the SDK finishes its own setup.
   function start() {
-    if (!allowed()) return;
-    const a = load();
-    if (!a) return;
-    if (!initialised) { try { a.initialize(APTABASE_KEY); initialised = true; } catch { return; } }
+    if (!allowed() || !initialised) return;
     if (!startedThisRun) { track('app_started'); startedThisRun = true; }
     scheduleHeartbeat();
   }
@@ -69,7 +80,7 @@ function createTelemetry({ store }) {
     return { configured: configured(), enabled: store.data.settings.telemetry !== false };
   }
 
-  return { start, refresh, track, status };
+  return { initEarly, start, refresh, track, status };
 }
 
 module.exports = { createTelemetry, APTABASE_KEY };
