@@ -224,4 +224,18 @@ async function test(site, secret) {
   throw new Error('Unknown website type.');
 }
 
-module.exports = { normalizeUrl, wpDiscover, wpAuthorizeUrl, wpVerify, wpRequest, wpUploadImage, publish, test, splitArticle };
+// The per-site "memory": notes the owner typed plus text extracted from files
+// they uploaded (schema, categories, brand guide…). Used as context wherever
+// the AI works on this site — writing, revisions and the SQL export.
+function memoryText(site, cap = 40000) {
+  const mem = site && site.memory;
+  if (!mem) return '';
+  const parts = [];
+  if (mem.notes && String(mem.notes).trim()) parts.push(String(mem.notes).trim());
+  for (const f of mem.files || []) { if (f && f.text) parts.push(`### ${f.name}\n${f.text}`); }
+  let out = parts.join('\n\n');
+  if (out.length > cap) out = `${out.slice(0, cap)}\n[…truncated]`;
+  return out;
+}
+
+module.exports = { normalizeUrl, wpDiscover, wpAuthorizeUrl, wpVerify, wpRequest, wpUploadImage, publish, test, splitArticle, memoryText };

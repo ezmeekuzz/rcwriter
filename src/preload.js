@@ -111,6 +111,9 @@ contextBridge.exposeInMainWorld('api', {
   tgSet: (p) => invoke('tg:set', p),
   setSiteMonitor: (id, cfg) => invoke('site:setMonitor', id, cfg),
   setSiteAutoFix: (id, cfg) => invoke('site:setAutoFix', id, cfg),
+  setSiteMemory: (id, notes) => invoke('site:setMemory', id, notes),
+  addSiteMemoryFiles: (id) => invoke('site:addMemoryFiles', id),
+  removeSiteMemoryFile: (id, name) => invoke('site:removeMemoryFile', id, name),
   checkSiteNow: (id) => invoke('site:checkNow', id),
   setSiteClient: (id, clientId) => invoke('site:setClient', id, clientId),
   saveClient: (c) => invoke('client:save', c),
@@ -148,6 +151,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteArticle: (id, removeFile) => invoke('article:delete', id, removeFile),
   revealArticle: (id) => invoke('article:reveal', id),
   openArticleFile: (id) => invoke('article:openFile', id),
+  exportArticleSql: (id) => invoke('article:sqlExport', id),
 
   onState: on('state'),
   onOpenArticle: on('open-article'),

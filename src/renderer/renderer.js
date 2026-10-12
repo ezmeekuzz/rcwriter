@@ -485,6 +485,7 @@ async function loadReader() {
         ${a.published && a.published.status !== 'sent' && (S.sites.find((x) => x.id === a.published.siteId) || {}).type === 'wordpress' ? `<button class="btn" data-action="link-older" data-id="${a.id}">Link from older posts</button>` : ''}
         ${a.published && a.published.status === 'publish' ? `<button class="btn" data-action="share-article" data-id="${a.id}">Share on social</button>` : ''}
         <button class="btn" data-action="copy-article" data-id="${a.id}">Copy text</button>
+        <button class="btn" data-action="export-sql" data-id="${a.id}">Download SQL</button>
         <button class="btn" data-action="open-article-file" data-id="${a.id}">Open file</button>
         <button class="btn ghost" data-action="reveal-article" data-id="${a.id}">Show in folder</button>
         <button class="btn ghost danger" data-action="delete-article" data-id="${a.id}" aria-label="Delete article">Delete</button>
@@ -775,6 +776,9 @@ function writerModalHtml(d) {
               <option value="pexels" ${d.imageSource === 'pexels' ? 'selected' : ''}>Free stock photo from Pexels</option>
               <option value="openai" ${d.imageSource === 'openai' ? 'selected' : ''}>Generate with OpenAI</option></select>
               <span class="hint">The AI writes the alt text. ${!S.images.hasPexelsKey && d.imageSource === 'pexels' ? 'Add a free Pexels key in Settings first.' : !S.images.hasOpenAiKey && d.imageSource === 'openai' ? 'Needs an OpenAI API key under AI providers (billed per image).' : 'Pexels needs a free key in Settings; OpenAI uses your API key.'}</span></div>
+            <div class="field" style="max-width:260px"><label for="w-bimg">Images inside the article</label>
+              <select id="w-bimg" name="bodyImages">${[0, 1, 2, 3].map((n) => `<option value="${n}" ${Number(d.bodyImages || 0) === n ? 'selected' : ''}>${n === 0 ? 'None' : `${n} image${n > 1 ? 's' : ''} in the body`}</option>`).join('')}</select>
+              <span class="hint">Extra images placed in the article, in addition to the featured image. Uses the same image source above, embedded in the article.</span></div>
             <div class="field"><span class="label">Schema markup</span>
               <div class="checks col">
                 <label class="check"><input type="checkbox" name="schemaType" value="article" ${(d.schemaTypes || []).includes('article') ? 'checked' : ''}><span>Article</span></label>
@@ -832,6 +836,7 @@ function readWriterForm() {
   if (!d.siteId) d.publishStatus = 'none'; else if (d.publishStatus === 'none') d.publishStatus = 'draft';
   d.targetWords = Number(d.targetWords) || 1200;
   d.maxTokens = Number(d.maxTokens) || 8000;
+  d.bodyImages = Math.max(0, Math.min(3, Number(d.bodyImages) || 0));
   return d;
 }
 
@@ -1112,6 +1117,12 @@ const ACTIONS = {
     toast('Article copied');
   },
   'open-article-file': (el) => api.openArticleFile(el.dataset.id),
+  'export-sql': async (el) => {
+    el.disabled = true; const old = el.textContent; el.textContent = 'Building SQL…';
+    try { await api.exportArticleSql(el.dataset.id); toast('SQL file saved.'); }
+    catch (e) { toast(cleanErr(e), 'error'); }
+    finally { el.disabled = false; el.textContent = old; }
+  },
   'reveal-article': (el) => api.revealArticle(el.dataset.id),
   'delete-article': async (el) => {
     const a = S.articles.find((x) => x.id === el.dataset.id);

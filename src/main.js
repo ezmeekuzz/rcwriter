@@ -33,6 +33,7 @@ const { createTelegram } = require('./telegram');
 const { createTelemetry } = require('./telemetry');
 const { createUpdates } = require('./updates');
 const { extractFiles, SUPPORTED: BRIEF_EXTS } = require('./extract');
+const { createSqlExport } = require('./sqlexport');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -77,6 +78,7 @@ let leads = null;
 let assistant = null;
 let telegram = null;
 let telemetry = null;
+let sqlExport = null;
 let updates = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
@@ -252,8 +254,9 @@ function publicState() {
     settings: d.settings,
     providers: provs,
     writers: d.writers,
-    sites: d.sites.map(({ secret, ...rest }) => ({ ...rest, hasSecret: !!secret, pace: rest.pace || 'gentle', access: hostGuard.hostStatus(hostGuard.hostOf(rest.url)),
-      monitor: { ...MONITOR_DEFAULTS, ...(rest.monitor || {}) }, health: monitor ? monitor.status(rest.id) : null })),
+    sites: d.sites.map(({ secret, memory, ...rest }) => ({ ...rest, hasSecret: !!secret, pace: rest.pace || 'gentle', access: hostGuard.hostStatus(hostGuard.hostOf(rest.url)),
+      monitor: { ...MONITOR_DEFAULTS, ...(rest.monitor || {}) }, health: monitor ? monitor.status(rest.id) : null,
+      memory: { notes: (memory && memory.notes) || '', files: ((memory && memory.files) || []).map((f) => ({ name: f.name, chars: (f.text || '').length, at: f.at })) } })),
     clients: d.clients || [],
     tasks: (d.tasks || []).slice(0, 1000),
     digests: (d.digests || []).slice(0, 7),
@@ -586,6 +589,8 @@ async function buildSiteContext(writer) {
       }
     } catch (e) { store.log('info', `${writer.name}: couldn't read Search Console data (${e.message}). Writing without it.`); }
   }
+  const mem = sites.memoryText(site);
+  if (mem) parts.push(`What RCWriter remembers about ${site.name} (treat as true for this site — use its categories, names, facts and conventions):\n${mem}`);
   return parts.join('\n\n');
 }
 
@@ -944,6 +949,27 @@ function registerIpc() {
     const a = store.data.articles.find((x) => x.id === id);
     if (a) return shell.openPath(a.path);
   });
+  handle('article:sqlExport', async (id) => {
+    const d = store.data;
+    const a = d.articles.find((x) => x.id === id);
+    if (!a) throw new Error('Article not found.');
+    const writer = d.writers.find((w) => w.id === a.writerId) || {};
+    const site = d.sites.find((s) => s.id === (a.siteId || writer.siteId));
+    if (!site) throw new Error('This article isn\'t linked to a website. Set the writer\'s website (and its Memory) so RCWriter knows the database to build SQL for.');
+    let fileText;
+    try { fileText = fs.readFileSync(a.path, 'utf8'); } catch { throw new Error(`The article file was moved or deleted: ${a.path}`); }
+    const parts = sites.splitArticle(fileText);
+    let featuredDataUri = null;
+    if (a.image && a.image.path) { try { featuredDataUri = `data:${a.image.mime || 'image/png'};base64,${fs.readFileSync(a.image.path).toString('base64')}`; } catch { /* no featured */ } }
+    const sql = await sqlExport.build({ site, article: { title: parts.title || a.title, excerpt: parts.excerpt || '', html: parts.html, slug: generator.slugify(parts.title || a.title) }, featuredDataUri });
+    const def = `${generator.slugify(parts.title || a.title) || 'article'}.sql`;
+    const r = await dialog.showSaveDialog(win, { defaultPath: def, filters: [{ name: 'SQL', extensions: ['sql'] }] });
+    let savedPath;
+    if (!r.canceled && r.filePath) { fs.writeFileSync(r.filePath, sql, 'utf8'); savedPath = r.filePath; }
+    else { savedPath = sqlExport.save(a, sql); }
+    shell.showItemInFolder(savedPath);
+    return { path: savedPath };
+  });
   handle('link:open', (url) => { if (/^https?:\/\//.test(url)) shell.openExternal(url); });
   handle('update:dismiss', () => { if (updates) updates.dismissUpdate(); });
   handle('announce:dismiss', () => { if (updates) updates.dismissAnnounce(); });
@@ -1047,6 +1073,48 @@ function registerIpc() {
     const site = store.data.sites.find((x) => x.id === id);
     if (!site || !hostGuard.PACES[pace]) throw new Error('Unknown website or pace.');
     site.pace = pace;
+    store.save();
+    broadcast();
+  });
+  handle('site:setMemory', (id, notes) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site) throw new Error('Website not found.');
+    site.memory = site.memory || { notes: '', files: [] };
+    site.memory.notes = String(notes || '').slice(0, 100000);
+    store.save();
+    broadcast();
+    return true;
+  });
+  handle('site:addMemoryFiles', async (id) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site) throw new Error('Website not found.');
+    const r = await dialog.showOpenDialog(win, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Files', extensions: ['sql', 'csv', 'tsv', 'json', 'xml', 'txt', 'md', 'docx', 'xlsx', 'xls', 'pdf', 'yaml', 'yml'] }, { name: 'All files', extensions: ['*'] }]
+    });
+    if (r.canceled || !r.filePaths.length) return { added: 0, errors: [] };
+    site.memory = site.memory || { notes: '', files: [] };
+    const errors = [];
+    let added = 0;
+    for (const fp of r.filePaths) {
+      if (!BRIEF_EXTS.includes(path.extname(fp).toLowerCase())) { errors.push(`${path.basename(fp)}: unsupported type`); continue; }
+      try {
+        const { extractOne } = require('./extract');
+        const { name, text } = await extractOne(fp);
+        if (!text) { errors.push(`${name}: no readable text`); continue; }
+        site.memory.files = (site.memory.files || []).filter((f) => f.name !== name);
+        site.memory.files.push({ name, text, at: new Date().toISOString() });
+        added += 1;
+      } catch (e) { errors.push(`${path.basename(fp)}: ${e.message}`); }
+    }
+    store.save();
+    broadcast();
+    return { added, errors };
+  });
+  handle('site:removeMemoryFile', (id, name) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site || !site.memory) return;
+    site.memory.files = (site.memory.files || []).filter((f) => f.name !== name);
     store.save();
     broadcast();
   });
@@ -1253,10 +1321,11 @@ function registerIpc() {
       '2. Inspect the current site with the tools to see what already exists.',
       '3. Carry out the requested revisions using the available tools (WordPress and WPVibe, page builders, redirects, media, etc.), following the autonomy rules below.',
       'Do only what the brief asks — make no unrelated changes. If part of the brief is unclear, impossible, or risky, do not guess: skip it and explain why in the report.',
+      (() => { const m = sites.memoryText(site); return m ? `\n## What RCWriter remembers about this site\nUse this as true for this site — its categories, names, facts and conventions.\n${m}` : ''; })(),
       '',
       '## The brief',
       brief
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     const job = {
       id: `brief-${store.uid()}`,
       name: name || `Brief — ${site.name} — ${new Date().toISOString().slice(0, 10)}`,
@@ -1674,6 +1743,7 @@ if (gotLock) {
     builtins = createBuiltins({ store, google, guser, socialTools: () => (distribution ? distribution.tools() : []), visualTools: (s) => (webdev ? webdev.visualTools(s) : []) });
     auditor = createAuditor({
       store, connectors: connectorMgr, builtins, providers, codex, codexCmd, codexProblem, onChange: broadcast,
+      siteMemory: (siteId) => { const s = store.data.sites.find((x) => x.id === siteId); return s ? sites.memoryText(s) : ''; },
       afterRun: (job, rec, text) => automation.afterAudit(job, rec, text),
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
       paths: {
@@ -1709,6 +1779,7 @@ if (gotLock) {
     updates = createUpdates({ store, currentVersion: app.getVersion(), onChange: broadcast });
     setTimeout(() => updates.check(), 10 * 1000);
     setInterval(() => updates.check(), 6 * 60 * 60 * 1000);
+    sqlExport = createSqlExport({ ai: assistantAi, memoryText: sites.memoryText });
     const crawler = createCrawler({ store, providers, ai: assistantAi, assistantChoice });
     leads = createLeads({ store, ai: assistantAi, guser, google, htmlToPdf, onChange: broadcast, addTask: (t) => automation.addTask(t), crawler,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });

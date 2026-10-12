@@ -109,6 +109,17 @@ function createPipeline({ store, providers, builtins, auditor, providerConfig, p
       }
     }
 
+    if (writer.imageSource && writer.imageSource !== 'none' && Number(writer.bodyImages) > 0) {
+      try {
+        const body = readBody(article);
+        const r = await enhance.addBodyImages({
+          ai, title: article.title, bodyMarkdown: body, count: writer.bodyImages, source: writer.imageSource,
+          openaiKey: store.getKey('openai'), pexelsKey: store.decrypt((d().images || {}).pexelsKey), model: (d().images || {}).model, log
+        });
+        if (r.added) { enhance.rewriteBody(article.path, r.markdown); article.bodyImages = r.added; }
+      } catch (e) { log(`In-body images for "${article.title}" skipped: ${e.message}`); }
+    }
+
     if ((writer.schemaTypes || []).length) {
       try {
         const schema = schemaFor(writer, article, null);

@@ -216,6 +216,26 @@ function openAutoFixModal(siteId) {
     </div></div>`;
 }
 
+function openMemoryModal(siteId) {
+  const site = S.sites.find((x) => x.id === siteId);
+  const mem = site.memory || { notes: '', files: [] };
+  modal = { type: 'memory', siteId };
+  const files = (mem.files || []).map((f) => `<span class="chip">${esc(f.name)} <span class="muted small">(${Math.round((f.chars || 0) / 1000)}k)</span><button data-action="memory-remove-file" data-id="${esc(siteId)}" data-name="${esc(f.name)}" aria-label="Remove">×</button></span>`).join('');
+  modalRoot.innerHTML = `
+    <div class="backdrop"><div class="modal small" role="dialog" aria-modal="true" aria-labelledby="mt">
+      <header><h2 id="mt">Memory for ${esc(site.name)}</h2></header>
+      <div class="body">
+        <p class="muted small">Anything here is remembered and used whenever RCWriter writes, revises or exports for this site — its categories, brand facts, conventions, and (for non-WordPress sites) the database structure. Upload an .sql export or a categories file so exports use your real data.</p>
+        <div class="field"><label for="mem-notes">Notes RCWriter should remember</label><textarea id="mem-notes" rows="6" placeholder="e.g. Categories: News (id 2), Guides (id 5), Reviews (id 8). Author id for posts: 1. Brand voice: friendly, no jargon.">${esc(mem.notes || '')}</textarea></div>
+        <div class="field"><label>Uploaded files</label>
+          <div class="chips">${files || '<span class="muted small">No files yet.</span>'}</div>
+          <div class="btn-row" style="margin-top:8px"><button class="btn" data-action="memory-add-files" data-id="${esc(siteId)}">Upload file…</button><span class="muted small">.sql, .csv, Word, Excel, PDF, text.</span></div>
+        </div>
+      </div>
+      <footer><span></span><div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="memory-save">Save notes</button></div></footer>
+    </div></div>`;
+}
+
 VIEWS.clients = viewClients;
 
 Object.assign(ACTIONS, {
@@ -243,6 +263,26 @@ Object.assign(ACTIONS, {
   },
   'client-filter': (el, e) => { if (e) e.preventDefault(); setClientFilter(el.dataset.id); },
   'monitor-edit': (el) => openMonitorModal(el.dataset.id),
+  'memory-edit': (el) => openMemoryModal(el.dataset.id),
+  'memory-save': async () => {
+    try { await api.setSiteMemory(modal.siteId, modalRoot.querySelector('#mem-notes').value); toast('Memory saved'); closeModal(); } catch (e) { toast(cleanErr(e), 'error'); }
+  },
+  'memory-add-files': async (el) => {
+    const id = el.dataset.id;
+    const notesEl = modalRoot.querySelector('#mem-notes');
+    if (notesEl) { try { await api.setSiteMemory(id, notesEl.value); } catch { /* keep going */ } }
+    el.disabled = true; el.textContent = 'Reading…';
+    try {
+      const r = await api.addSiteMemoryFiles(id);
+      if (r.added) toast(`${r.added} file${r.added > 1 ? 's' : ''} added to memory.${r.errors.length ? ` Skipped: ${r.errors.join('; ')}` : ''}`);
+      else if (r.errors.length) toast(`Couldn't add: ${r.errors.join('; ')}`, 'error');
+      openMemoryModal(id);
+    } catch (e) { toast(cleanErr(e), 'error'); el.disabled = false; el.textContent = 'Upload file…'; }
+  },
+  'memory-remove-file': async (el) => {
+    await attempt(() => api.removeSiteMemoryFile(el.dataset.id, el.dataset.name));
+    openMemoryModal(el.dataset.id);
+  },
   'autofix-edit': (el) => openAutoFixModal(el.dataset.id),
   'autofix-save': async () => {
     const cats = Object.keys(S.autoFixCategories || { alt: 1, meta: 1, redirect: 1, media: 1, content: 1, other: 1 });

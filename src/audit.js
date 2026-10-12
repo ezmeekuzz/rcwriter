@@ -63,7 +63,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const toml = (s) => JSON.stringify(String(s));
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n)}\n[…truncated ${s.length - n} characters]` : s; };
 
-function createAuditor({ store, connectors, builtins, providers, codex, codexCmd, codexProblem = () => null, notify, onChange, paths, afterRun = null }) {
+function createAuditor({ store, connectors, builtins, providers, codex, codexCmd, codexProblem = () => null, notify, onChange, paths, afterRun = null, siteMemory = null }) {
   const runs = new Map(); // runId -> live run
   let bridgeServer = null;
   let bridgeUrl = null;
@@ -272,6 +272,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       'You are an experienced website auditor and SEO specialist working for the site owner.',
       `Website: ${job.siteUrl || '(see the connected tools)'}`,
       `## Owner's instructions\n${job.instructions || TEMPLATES.technical}`,
+      (() => { const m = job.siteId && siteMemory ? siteMemory(job.siteId) : ''; return m ? `## What RCWriter remembers about this site\nUse this as true for this site — its categories, names, facts and conventions.\n${clip(m, 8000)}` : ''; })(),
       job.context ? `## Why this audit is running now\n${job.context}` : '',
       previousReport(job),
       `## What you are allowed to do (${MODES[job.mode]})\n${modeRules}`,

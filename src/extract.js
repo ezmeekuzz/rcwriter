@@ -7,8 +7,8 @@ const path = require('path');
 const PER_FILE = 40000;   // characters kept per file
 const TOTAL = 120000;     // characters kept across all files in one brief
 
-const SUPPORTED = ['.docx', '.xlsx', '.xls', '.xlsm', '.pdf', '.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.html', '.htm', '.rtf'];
-const PLAIN = ['.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.html', '.htm', '.rtf'];
+const SUPPORTED = ['.docx', '.xlsx', '.xls', '.xlsm', '.pdf', '.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.html', '.htm', '.rtf', '.sql', '.xml', '.yaml', '.yml'];
+const PLAIN = ['.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.html', '.htm', '.rtf', '.sql', '.xml', '.yaml', '.yml'];
 
 async function extractOne(file) {
   const ext = path.extname(file).toLowerCase();

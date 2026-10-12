@@ -75,11 +75,11 @@ async function imageBrief({ ai, title, text, source }) {
   return { prompt: String(j.prompt || title), query: String(j.query || title).slice(0, 80), alt: String(j.alt || title).slice(0, 150) };
 }
 
-async function makeImage({ source, brief, openaiKey, pexelsKey, model }) {
+async function makeImage({ source, brief, openaiKey, pexelsKey, model, size }) {
   if (source === 'openai') {
     if (!openaiKey) throw new Error('Add an OpenAI API key under AI providers to generate images.');
     const m = model || 'gpt-image-1';
-    const body = { model: m, prompt: `${brief.prompt}. Photorealistic, natural light. No text, words, letters, logos or watermarks.`, n: 1, size: m.startsWith('dall-e') ? '1792x1024' : '1536x1024' };
+    const body = { model: m, prompt: `${brief.prompt}. Photorealistic, natural light. No text, words, letters, logos or watermarks.`, n: 1, size: size || (m.startsWith('dall-e') ? '1792x1024' : '1536x1024') };
     if (m.startsWith('dall-e')) body.response_format = 'b64_json';
     const res = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${openaiKey}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(5 * 60000)
@@ -108,6 +108,46 @@ async function makeImage({ source, brief, openaiKey, pexelsKey, model }) {
     return { buffer, mime: 'image/jpeg', ext: 'jpg', alt: p.alt && p.alt.length > 15 ? p.alt.slice(0, 150) : brief.alt /* Pexels' own alt describes the actual photo */, credit: `Photo by ${p.photographer} on Pexels`, creditUrl: p.url };
   }
   throw new Error('Unknown image source.');
+}
+
+// ---------- in-body images ----------
+// Generate up to `count` images and insert them into the article body as base64
+// data URIs, placed after section headings so they render everywhere (the
+// in-app reader, webhooks, WordPress and the SQL export) with no hosting.
+async function addBodyImages({ ai, title, bodyMarkdown, count, source, openaiKey, pexelsKey, model, log = () => {} }) {
+  const n = Math.max(0, Math.min(3, Number(count) || 0));
+  if (!n) return { markdown: bodyMarkdown, added: 0 };
+  const lines = bodyMarkdown.split('\n');
+  const headings = [];
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^```/.test(lines[i])) inFence = !inFence;
+    if (!inFence && /^##\s+\S/.test(lines[i])) headings.push(i);
+  }
+  if (!headings.length) return { markdown: bodyMarkdown, added: 0 };
+  // Spread the chosen headings across the article (skip the very first if we can).
+  const pool = headings.length > n ? headings.slice(1) : headings;
+  const chosen = [];
+  const step = Math.max(1, Math.floor(pool.length / n));
+  for (let k = 0; k < pool.length && chosen.length < n; k += step) chosen.push(pool[k]);
+  const inserts = {}; // line index -> markdown to append after it
+  let added = 0;
+  for (const idx of chosen) {
+    const headingText = lines[idx].replace(/^#+\s+/, '').trim();
+    const section = lines.slice(idx + 1, idx + 12).join('\n');
+    try {
+      const brief = await imageBrief({ ai, title: `${title} — ${headingText}`, text: section || headingText, source });
+      const img = await makeImage({ source, brief, openaiKey, pexelsKey, model, size: source === 'openai' ? (String(model || 'gpt-image-1').startsWith('dall-e') ? '1024x1024' : '1024x1024') : undefined });
+      const dataUri = `data:${img.mime};base64,${img.buffer.toString('base64')}`;
+      const credit = img.credit ? `\n*${img.credit}*` : '';
+      inserts[idx] = `\n\n![${(img.alt || headingText).replace(/[[\]]/g, '')}](${dataUri})${credit}\n`;
+      added += 1;
+    } catch (e) { log(`In-body image for "${headingText}" skipped: ${e.message}`); }
+  }
+  if (!added) return { markdown: bodyMarkdown, added: 0 };
+  const out = [];
+  for (let i = 0; i < lines.length; i++) { out.push(lines[i]); if (inserts[i]) out.push(inserts[i]); }
+  return { markdown: out.join('\n'), added };
 }
 
 // ---------- schema markup ----------
@@ -225,4 +265,4 @@ async function pickAnchor({ ai, newTitle, postTitle, html }) {
   return j && j.anchor ? String(j.anchor).trim() : null;
 }
 
-module.exports = { parseJson, splitFront, rewriteBody, qualityCheck, revise, imageBrief, makeImage, buildSchema, schemaScript, faqFromMarkdown, insertLink, htmlText, pickRelated, pickAnchor, plain };
+module.exports = { parseJson, splitFront, rewriteBody, qualityCheck, revise, imageBrief, makeImage, addBodyImages, buildSchema, schemaScript, faqFromMarkdown, insertLink, htmlText, pickRelated, pickAnchor, plain };
