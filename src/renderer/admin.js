@@ -32,18 +32,28 @@ function viewTasks() {
   const rows = sorted.map((t) => {
     const overdue = t.status !== 'done' && t.due && t.due < todayIso();
     const site = S.sites.find((x) => x.id === t.siteId);
+    const aiRun = t.aiRunJobId ? (S.auditRuns || []).find((r) => r.jobId === t.aiRunJobId) : null;
+    const aiWorking = aiRun && aiRun.status === 'running';
+    const aiChip = aiWorking
+      ? '<span class="chip ai-working"><span class="spinner" style="display:inline-block;vertical-align:-2px;margin-right:5px"></span>AI working…</span>'
+      : aiRun && aiRun.status === 'done'
+        ? `<span class="chip ok">AI finished${aiRun.queued ? ` · ${aiRun.queued} waiting` : aiRun.applied ? ` · ${aiRun.applied} applied` : ''}</span>`
+        : aiRun && (aiRun.status === 'failed' || aiRun.status === 'stopped')
+          ? `<span class="chip danger">AI ${aiRun.status === 'stopped' ? 'stopped' : 'failed'}</span>`
+          : t.status === 'doing' ? '<span class="chip">In progress</span>' : '';
     return `
       <div class="row task-row ${t.status === 'done' ? 'done' : ''}">
         <input type="checkbox" data-change="task-done" data-id="${t.id}" ${t.status === 'done' ? 'checked' : ''} aria-label="Done: ${esc(t.title)}">
         <div>
-          <div class="title">${esc(t.title)} <span class="chip pr-${t.priority}">${PRIORITY_LABEL[t.priority] || t.priority}</span>${t.status === 'doing' ? ' <span class="chip">In progress</span>' : ''}</div>
+          <div class="title">${esc(t.title)} <span class="chip pr-${t.priority}">${PRIORITY_LABEL[t.priority] || t.priority}</span> ${aiChip}</div>
           <div class="meta">${[clientName(t.clientId), site && site.name, SOURCE_LABEL[t.source], t.emailFromName && `from ${t.emailFromName}`, t.due && `${overdue ? '<span class="err">overdue, ' : 'due '}${esc(t.due)}${overdue ? '</span>' : ''}`, `added ${fmtRel(t.createdAt)}`].filter(Boolean).map((x) => (String(x).startsWith('<') || /^(due|<span)/.test(x) ? x : esc(x))).join(' · ')}</div>
           ${t.notes ? `<details class="detail"><summary>Notes</summary><p class="small" style="white-space:pre-wrap">${esc(t.notes)}</p></details>` : ''}
         </div>
         <div class="btn-row">
           ${t.emailThreadId ? `<button class="btn" data-action="task-reply" data-id="${t.id}">${t.replyDraftAt ? 'Draft again' : 'Draft reply'}</button><button class="btn ghost" data-action="link" data-url="${esc(t.link)}">Open email</button>` : ''}
-          ${t.status !== 'done' && taskSite(t) ? `<button class="btn" data-action="task-doai" data-id="${t.id}">Do with AI</button>` : ''}
-          ${t.status === 'todo' ? `<button class="btn ghost" data-action="task-doing" data-id="${t.id}">Start</button>` : ''}
+          ${aiRun ? `<button class="btn ghost" data-action="open-audit-report" data-id="${esc(aiRun.id)}">${aiWorking ? 'View progress' : 'View result'}</button>` : ''}
+          ${t.status !== 'done' && taskSite(t) && !aiWorking ? `<button class="btn" data-action="task-doai" data-id="${t.id}">${aiRun ? 'Do again with AI' : 'Do with AI'}</button>` : ''}
+          ${t.status === 'todo' && !aiWorking ? `<button class="btn ghost" data-action="task-doing" data-id="${t.id}">Start</button>` : ''}
           <button class="btn ghost" data-action="task-edit" data-id="${t.id}">Edit</button>
           <button class="btn ghost danger" data-action="task-delete" data-id="${t.id}" aria-label="Delete task">Delete</button>
         </div>

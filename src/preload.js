@@ -110,6 +110,7 @@ contextBridge.exposeInMainWorld('api', {
   tgTest: () => invoke('tg:test'),
   tgSet: (p) => invoke('tg:set', p),
   setSiteMonitor: (id, cfg) => invoke('site:setMonitor', id, cfg),
+  setSiteAutoFix: (id, cfg) => invoke('site:setAutoFix', id, cfg),
   checkSiteNow: (id) => invoke('site:checkNow', id),
   setSiteClient: (id, clientId) => invoke('site:setClient', id, clientId),
   saveClient: (c) => invoke('client:save', c),

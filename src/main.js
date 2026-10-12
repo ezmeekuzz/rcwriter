@@ -16,7 +16,7 @@ const codex = require('./codex');
 const codexInstall = require('./codex-install');
 const lock = require('./lock');
 const { PRESETS, createConnectors } = require('./connectors');
-const { createAuditor, MODES, TEMPLATES, TEMPLATE_NEEDS } = require('./audit');
+const { createAuditor, MODES, TEMPLATES, TEMPLATE_NEEDS, AUTOFIX_CATEGORIES } = require('./audit');
 const { createPipeline } = require('./pipeline');
 const { createMonitor, DEFAULTS: MONITOR_DEFAULTS } = require('./monitor');
 const { createGoogleUser } = require('./googleuser');
@@ -289,6 +289,7 @@ function publicState() {
     auditModes: MODES,
     auditTemplates: TEMPLATES,
     templateNeeds: TEMPLATE_NEEDS,
+    autoFixCategories: AUTOFIX_CATEGORIES,
     images: { hasPexelsKey: !!(d.images && d.images.pexelsKey), model: (d.images && d.images.model) || 'gpt-image-1', hasOpenAiKey: !!store.getKey('openai') },
     schedules: d.schedules,
     articles: d.articles.slice(0, 1000),
@@ -1048,6 +1049,16 @@ function registerIpc() {
     site.pace = pace;
     store.save();
     broadcast();
+  });
+  handle('site:setAutoFix', (id, cfg = {}) => {
+    const site = store.data.sites.find((x) => x.id === id);
+    if (!site) throw new Error('Website not found.');
+    const out = {};
+    for (const [k, v] of Object.entries(cfg || {})) { if (v === 'auto' || v === 'ask') out[k] = v; } // anything else = inherit (omitted)
+    site.autoFix = out;
+    store.save();
+    broadcast();
+    return site.autoFix;
   });
   handle('site:setMonitor', (id, cfg = {}) => {
     const site = store.data.sites.find((x) => x.id === id);

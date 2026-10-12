@@ -194,6 +194,28 @@ function openMonitorModal(siteId) {
     </div></div>`;
 }
 
+function openAutoFixModal(siteId) {
+  const site = S.sites.find((x) => x.id === siteId);
+  const cur = site.autoFix || {};
+  const cats = S.autoFixCategories || { alt: 'Image alt text', meta: 'Titles, meta descriptions & slugs', redirect: '301 redirects', media: 'Images & media', content: 'Page & post content', other: 'Everything else' };
+  modal = { type: 'autofix', siteId };
+  const opt = (cat) => { const v = cur[cat] || ''; return `
+    <select id="af-${cat}">
+      <option value="" ${v === '' ? 'selected' : ''}>Use the run's setting</option>
+      <option value="auto" ${v === 'auto' ? 'selected' : ''}>Always apply automatically</option>
+      <option value="ask" ${v === 'ask' ? 'selected' : ''}>Always ask me first</option>
+    </select>`; };
+  modalRoot.innerHTML = `
+    <div class="backdrop"><div class="modal small" role="dialog" aria-modal="true" aria-labelledby="mt">
+      <header><h2 id="mt">Automatic fixes for ${esc(site.name)}</h2></header>
+      <div class="body">
+        <p class="muted small">For each kind of change, choose whether the AI applies it automatically or always waits for your approval — on this site, whatever a run's autonomy level is set to. “Use the run's setting” leaves it to the audit or revision's own autonomy.</p>
+        ${Object.entries(cats).map(([cat, label]) => `<div class="field"><label for="af-${cat}">${esc(label)}</label>${opt(cat)}</div>`).join('')}
+      </div>
+      <footer><span></span><div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="autofix-save">Save</button></div></footer>
+    </div></div>`;
+}
+
 VIEWS.clients = viewClients;
 
 Object.assign(ACTIONS, {
@@ -221,6 +243,13 @@ Object.assign(ACTIONS, {
   },
   'client-filter': (el, e) => { if (e) e.preventDefault(); setClientFilter(el.dataset.id); },
   'monitor-edit': (el) => openMonitorModal(el.dataset.id),
+  'autofix-edit': (el) => openAutoFixModal(el.dataset.id),
+  'autofix-save': async () => {
+    const cats = Object.keys(S.autoFixCategories || { alt: 1, meta: 1, redirect: 1, media: 1, content: 1, other: 1 });
+    const cfg = {};
+    for (const cat of cats) { const el = modalRoot.querySelector(`#af-${cat}`); if (el && el.value) cfg[cat] = el.value; }
+    try { await api.setSiteAutoFix(modal.siteId, cfg); toast('Automatic-fix rules saved'); closeModal(); } catch (e) { toast(cleanErr(e), 'error'); }
+  },
   'monitor-check': async (el) => {
     el.disabled = true; el.textContent = 'Checking…';
     try { await api.checkSiteNow(el.dataset.id); toast('Checked'); } catch (e) { toast(cleanErr(e), 'error'); }

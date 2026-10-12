@@ -32,6 +32,30 @@ const TEMPLATES = {
 // Connections each template works best with, shown as a hint in the audit form.
 const TEMPLATE_NEEDS = { refresh: ['google', 'wp'], competitors: ['ahrefs|semrush'], aiVisibility: ['ahrefs'], backlinks: ['ahrefs|semrush'], redirects: ['wp', 'ahrefs|semrush'], local: ['gbp'] };
 
+// Change categories, used by per-site "automatic fixes" rules. A site can set
+// each category to apply automatically or always wait for approval, overriding
+// the run's autonomy level.
+const AUTOFIX_CATEGORIES = {
+  alt: 'Image alt text',
+  meta: 'Titles, meta descriptions & slugs',
+  redirect: '301 redirects',
+  media: 'Images & media',
+  content: 'Page & post content',
+  other: 'Everything else'
+};
+function classifyTool(tool) {
+  const t = String(tool || '').toLowerCase();
+  // Destructive actions never belong to a "safe" category — keep them in "other"
+  // so a content/media auto-rule can't sweep a delete in.
+  if (/delete|remove|trash|destroy|drop|deactivate|uninstall|purge|wipe/.test(t)) return 'other';
+  if (/\balt\b|alt_text|setimagealt|image_alt/.test(t)) return 'alt';
+  if (/redirect/.test(t)) return 'redirect';
+  if (/title|excerpt|meta|seo|description|slug|keyword/.test(t)) return 'meta';
+  if (/image|media|photo|upload|featured|thumbnail/.test(t)) return 'media';
+  if (/content|post|page|body|paragraph|block|rewrite|replace|patch|edit_file|write_file|snippet|css/.test(t)) return 'content';
+  return 'other';
+}
+
 const RESULT_LIMIT = 20000;
 const guard = require('./hostguard');
 const slug = (s, n = 40) => String(s || 'audit').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, n) || 'audit';
@@ -181,11 +205,18 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
     }
 
     const limitHit = run.rec.applied >= (Number(job.maxChanges) || 25);
-    const needsApproval = job.mode === 'approve' || (job.mode === 'safe' && entry.risk !== 'safe') || limitHit;
+    // Per-site automatic-fix rule for this change's category can override the mode.
+    const category = classifyTool(entry.tool);
+    const site = job.siteId ? d().sites.find((s) => s.id === job.siteId) : null;
+    const rule = site && site.autoFix ? site.autoFix[category] : null; // 'auto' | 'ask' | undefined
+    let needsApproval;
+    if (rule === 'ask') needsApproval = true;
+    else if (rule === 'auto') needsApproval = limitHit;
+    else needsApproval = job.mode === 'approve' || (job.mode === 'safe' && entry.risk !== 'safe') || limitHit;
     if (needsApproval) {
       const dupe = d().approvals.find((a) => a.status === 'pending' && a.jobId === job.id && a.tool === entry.tool && a.connectorId === entry.conn.id && JSON.stringify(a.args) === JSON.stringify(args));
       if (!dupe) {
-        d().approvals.unshift({ id: uid(), ...base, status: 'pending', createdAt: new Date().toISOString(), note: limitHit ? 'Held because this run reached its change limit.' : '' });
+        d().approvals.unshift({ id: uid(), ...base, status: 'pending', createdAt: new Date().toISOString(), note: limitHit ? 'Held because this run reached its change limit.' : rule === 'ask' ? `Held by your automatic-fix rule for "${AUTOFIX_CATEGORIES[category]}".` : '' });
         run.rec.queued += 1;
         store.save();
       }
@@ -591,4 +622,4 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
   return { runJob, research, stop, decide, revert, running: () => [...runs.values()].filter((r) => r.rec.kind !== 'research').map((r) => r.rec), MODES, TEMPLATES, policy, buildToolset };
 }
 
-module.exports = { createAuditor, MODES, TEMPLATES, TEMPLATE_NEEDS };
+module.exports = { createAuditor, MODES, TEMPLATES, TEMPLATE_NEEDS, AUTOFIX_CATEGORIES, classifyTool };

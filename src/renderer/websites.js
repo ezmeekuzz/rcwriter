@@ -54,6 +54,7 @@ function viewSitesShared() {
         <div class="btn-row">
           ${S.google.connected ? `<button class="btn" data-action="site-google" data-id="${site.id}">Google data</button>` : ''}
           ${site.type !== 'webhook' ? `<button class="btn ghost" data-action="monitor-edit" data-id="${site.id}">Monitoring</button>` : ''}
+          ${site.type !== 'webhook' ? `<button class="btn ghost" data-action="autofix-edit" data-id="${site.id}">Automatic fixes</button>` : ''}
           ${site.type !== 'webhook' ? `<button class="btn ghost" data-action="site-gbp" data-id="${site.id}">Business Profile</button>` : ''}
           <button class="btn ghost" data-action="test-site" data-id="${site.id}">Test</button>
           ${site.type === 'wordpress' ? `<button class="btn ghost" data-action="reconnect-site" data-id="${site.id}">Reconnect</button>` : site.type === 'webhook' ? `<button class="btn ghost" data-action="edit-webhook" data-id="${site.id}">Edit</button>` : `<button class="btn ghost" data-action="url-site-edit" data-id="${site.id}">Edit</button>`}

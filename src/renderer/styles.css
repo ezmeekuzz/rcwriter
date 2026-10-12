@@ -85,6 +85,10 @@ main:focus { outline: none; }
 .revise-run-actions .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--ink-soft); border: 1px solid var(--line); }
 .revise-run-actions .badge.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
 .revise-run-actions .badge.danger { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+
+.chip.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.chip.danger { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.chip.ai-working { background: color-mix(in srgb, var(--action) 12%, transparent); color: var(--action); }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 h1 { font: 600 28px/1.15 var(--display); margin: 0; letter-spacing: -.01em; }
 h2 { font-size: 15px; font-weight: 600; margin: 32px 0 10px; }
