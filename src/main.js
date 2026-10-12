@@ -32,6 +32,7 @@ const { createAssistant } = require('./assistant');
 const { createTelegram } = require('./telegram');
 const { createTelemetry } = require('./telemetry');
 const { createUpdates } = require('./updates');
+const { extractFiles, SUPPORTED: BRIEF_EXTS } = require('./extract');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -1214,6 +1215,58 @@ function registerIpc() {
     auditor.runJob(j).catch((e) => win?.webContents.send('toast', { msg: e.message, kind: 'error' }));
     return true;
   });
+  // ----- Revise from a brief: read a document / typed requirements, then revise the site -----
+  handle('brief:pickFiles', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Documents', extensions: ['docx', 'xlsx', 'xls', 'xlsm', 'pdf', 'txt', 'md', 'csv', 'tsv', 'json', 'html', 'htm', 'rtf'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    });
+    return r.canceled ? [] : r.filePaths.filter((f) => BRIEF_EXTS.includes(path.extname(f).toLowerCase()));
+  });
+
+  handle('brief:run', async ({ siteId, text, files, mode } = {}) => {
+    const d = store.data;
+    const site = d.sites.find((x) => x.id === siteId);
+    if (!site) throw new Error('Choose a website to work on.');
+    const typed = String(text || '').trim();
+    const ex = await extractFiles(files || []);
+    const brief = [typed, ex.text].filter(Boolean).join('\n\n');
+    if (!brief.trim()) throw new Error(ex.errors.length ? `Couldn't read your file(s): ${ex.errors.join('; ')}` : 'Type your requirements or attach a document first.');
+    const choice = assistantChoice();
+    if (choice.provider !== 'chatgpt' && !choice.model) throw new Error('Set up your AI first in Settings → Assistant AI (or connect ChatGPT), so revisions can run.');
+    if (choice.provider === 'chatgpt' && !(d.subscription.chatgpt && d.subscription.chatgpt.loggedIn)) throw new Error('Sign in to ChatGPT in AI providers, or set an API model in Settings → Assistant AI, so revisions can run.');
+    const theMode = MODES[mode] ? mode : 'approve';
+    const siteUrl = site.url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const instructions = [
+      'You are implementing a change request for the website below, sent by the site owner as a brief (typed notes and/or uploaded documents).',
+      '1. Read and analyse the brief and list exactly what is being asked.',
+      '2. Inspect the current site with the tools to see what already exists.',
+      '3. Carry out the requested revisions using the available tools (WordPress and WPVibe, page builders, redirects, media, etc.), following the autonomy rules below.',
+      'Do only what the brief asks — make no unrelated changes. If part of the brief is unclear, impossible, or risky, do not guess: skip it and explain why in the report.',
+      '',
+      '## The brief',
+      brief
+    ].join('\n');
+    const job = {
+      id: `brief-${store.uid()}`,
+      name: `Brief — ${site.name} — ${new Date().toISOString().slice(0, 10)}`,
+      siteId, siteUrl,
+      mode: theMode,
+      provider: choice.provider,
+      model: choice.model,
+      connectorIds: d.connectors.map((c) => c.id),
+      reportStyle: 'priority',
+      instructions,
+      task: 'Read the brief, inspect the site, and make the requested revisions now, then write the report.',
+      maxToolCalls: 80, maxChanges: 40, maxMinutes: 40
+    };
+    auditor.runJob(job).catch((e) => win?.webContents.send('toast', { msg: e.message, kind: 'error' }));
+    return { started: true, warnings: ex.errors };
+  });
+
   handle('audit:stop', (runId) => auditor.stop(runId));
   handle('audit:decide', (id, approve) => auditor.decide(id, approve));
   handle('audit:decideAll', async (ids, approve) => {

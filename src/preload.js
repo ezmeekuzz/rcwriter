@@ -133,6 +133,8 @@ contextBridge.exposeInMainWorld('api', {
   toggleAuditJob: (id, on) => invoke('audit:toggleJob', id, on),
   deleteAuditJob: (id) => invoke('audit:deleteJob', id),
   runAudit: (id) => invoke('audit:run', id),
+  pickBriefFiles: () => invoke('brief:pickFiles'),
+  runBrief: (opts) => invoke('brief:run', opts),
   stopAudit: (runId) => invoke('audit:stop', runId),
   decideApproval: (id, approve) => invoke('audit:decide', id, approve),
   decideApprovals: (ids, approve) => invoke('audit:decideAll', ids, approve),
