@@ -3,6 +3,7 @@
 // Tasks, client reports, the daily digest, Gmail and Google Business Profile.
 
 let taskFilter = 'open';
+let taskSelection = new Set();
 const PRIORITY_LABEL = { high: 'High', medium: 'Medium', low: 'Low' };
 const SOURCE_LABEL = { audit: 'From an audit', email: 'From an email', manual: 'Added by you', monitor: 'From monitoring' };
 const todayIso = () => new Date().toLocaleDateString('en-CA');
@@ -29,6 +30,11 @@ function viewTasks() {
   });
   const order = { high: 0, medium: 1, low: 2 };
   const sorted = taskFilter === 'done' ? all : [...all].sort((a, b) => (a.status === 'doing' ? -1 : 0) - (b.status === 'doing' ? -1 : 0) || (order[a.priority] ?? 1) - (order[b.priority] ?? 1) || String(a.due || '9999').localeCompare(String(b.due || '9999')));
+  const shownIds = sorted.map((t) => t.id);
+  window.tasksShownIds = shownIds;
+  const allIds = new Set(S.tasks.map((t) => t.id));
+  for (const id of [...taskSelection]) if (!allIds.has(id)) taskSelection.delete(id);
+  const sel = taskSelection;
   const rows = sorted.map((t) => {
     const overdue = t.status !== 'done' && t.due && t.due < todayIso();
     const site = S.sites.find((x) => x.id === t.siteId);
@@ -43,7 +49,7 @@ function viewTasks() {
           : t.status === 'doing' ? '<span class="chip">In progress</span>' : '';
     return `
       <div class="row task-row ${t.status === 'done' ? 'done' : ''}">
-        <input type="checkbox" data-change="task-done" data-id="${t.id}" ${t.status === 'done' ? 'checked' : ''} aria-label="Done: ${esc(t.title)}">
+        <input type="checkbox" data-change="task-select" data-id="${t.id}" ${taskSelection.has(t.id) ? 'checked' : ''} aria-label="Select: ${esc(t.title)}">
         <div>
           <div class="title">${esc(t.title)} <span class="chip pr-${t.priority}">${PRIORITY_LABEL[t.priority] || t.priority}</span> ${aiChip}</div>
           <div class="meta">${[clientName(t.clientId), site && site.name, SOURCE_LABEL[t.source], t.emailFromName && `from ${t.emailFromName}`, t.due && `${overdue ? '<span class="err">overdue, ' : 'due '}${esc(t.due)}${overdue ? '</span>' : ''}`, `added ${fmtRel(t.createdAt)}`].filter(Boolean).map((x) => (String(x).startsWith('<') || /^(due|<span)/.test(x) ? x : esc(x))).join(' · ')}</div>
@@ -54,6 +60,7 @@ function viewTasks() {
           ${aiRun ? `<button class="btn ghost" data-action="open-audit-report" data-id="${esc(aiRun.id)}">${aiWorking ? 'View progress' : 'View result'}</button>` : ''}
           ${t.status !== 'done' && taskSite(t) && !aiWorking ? `<button class="btn" data-action="task-doai" data-id="${t.id}">${aiRun ? 'Do again with AI' : 'Do with AI'}</button>` : ''}
           ${t.status === 'todo' && !aiWorking ? `<button class="btn ghost" data-action="task-doing" data-id="${t.id}">Start</button>` : ''}
+          <button class="btn ghost" data-action="${t.status === 'done' ? 'task-reopen' : 'task-complete'}" data-id="${t.id}">${t.status === 'done' ? 'Reopen' : 'Mark done'}</button>
           <button class="btn ghost" data-action="task-edit" data-id="${t.id}">Edit</button>
           <button class="btn ghost danger" data-action="task-delete" data-id="${t.id}" aria-label="Delete task">Delete</button>
         </div>
@@ -69,6 +76,16 @@ function viewTasks() {
     </div>
     ${clientBanner()}
     <div class="seg tabs" role="tablist">${[['open', `Open (${open})`], ['due', `Due (${due})`], ['done', `Done (${done})`], ['all', 'All']].map(([k, l]) => `<button role="tab" class="${taskFilter === k ? 'on' : ''}" data-action="task-filter" data-f="${k}">${l}</button>`).join('')}</div>
+    ${sorted.length ? `<div class="task-toolbar">
+      <label class="task-selall"><input type="checkbox" data-change="task-select-all" ${sel.size && shownIds.every((id) => sel.has(id)) ? 'checked' : ''} aria-label="Select all tasks"> Select all</label>
+      ${sel.size ? `<span class="muted small">${sel.size} selected</span>
+        <span class="task-bulk">
+          <button class="btn" data-action="tasks-bulk-doai">Do with AI</button>
+          <button class="btn ghost" data-action="tasks-bulk-done">Mark done</button>
+          <button class="btn ghost danger" data-action="tasks-bulk-delete">Delete</button>
+          <button class="btn ghost" data-action="tasks-sel-clear">Clear</button>
+        </span>` : ''}
+    </div>` : ''}
     <div class="list">${rows || `<div class="empty"><p>${taskFilter === 'done' ? 'Nothing done yet.' : 'No tasks here.'}</p>${S.googleUser.gmail ? '' : '<p class="muted small">Connect Gmail in Settings and add client email addresses to turn their requests into tasks automatically.</p>'}</div>`}</div>
     ${taskFilter === 'done' && done ? '<div class="btn-row" style="margin-top:12px"><button class="btn ghost danger" data-action="task-clear-done">Clear done tasks</button></div>' : ''}`;
 }
@@ -225,7 +242,40 @@ VIEWS.today = () => {
 };
 
 Object.assign(ACTIONS, {
-  'task-filter': (el) => { taskFilter = el.dataset.f; render(); },
+  'task-filter': (el) => { taskFilter = el.dataset.f; taskSelection.clear(); render(); },
+  'task-complete': (el) => attempt(() => api.setTaskStatus(el.dataset.id, 'done')),
+  'task-reopen': (el) => attempt(() => api.setTaskStatus(el.dataset.id, 'todo')),
+  'tasks-sel-clear': () => { taskSelection.clear(); render(); },
+  'tasks-bulk-delete': async () => {
+    const ids = [...taskSelection];
+    if (!ids.length) return;
+    if (await confirmModal({ title: `Delete ${ids.length} task${ids.length > 1 ? 's' : ''}?`, body: 'This removes them from the list.', confirm: 'Delete' })) {
+      closeModal();
+      taskSelection.clear();
+      await attempt(() => api.deleteTasks(ids), 'Deleted');
+    }
+  },
+  'tasks-bulk-done': async () => {
+    const ids = [...taskSelection];
+    if (!ids.length) return;
+    taskSelection.clear();
+    for (const id of ids) { try { await api.setTaskStatus(id, 'done'); } catch { /* skip */ } }
+    toast(`${ids.length} marked done`);
+    render();
+  },
+  'tasks-bulk-doai': async () => {
+    const ids = [...taskSelection];
+    const doable = ids.map((id) => S.tasks.find((t) => t.id === id)).filter((t) => t && t.status !== 'done' && taskSite(t));
+    const skipped = ids.length - doable.length;
+    if (!doable.length) { toast('None of the selected tasks have a website the AI can work on. Add a website to a task first (Edit).', 'error'); return; }
+    if (!(await confirmModal({ title: `Let RCWriter do ${doable.length} task${doable.length > 1 ? 's' : ''}?`, body: `The AI will work through them on their websites. Changes are prepared for your approval (nothing goes live until you approve it in Audits).${skipped ? ` ${skipped} selected task${skipped > 1 ? 's were' : ' was'} skipped (no website).` : ''}`, confirm: 'Do with AI' }))) return;
+    closeModal();
+    taskSelection.clear();
+    let started = 0;
+    for (const t of doable) { try { await api.doTaskWithAI(t.id, 'approve'); started += 1; } catch { /* skip */ } }
+    toast(`RCWriter is working on ${started} task${started > 1 ? 's' : ''}. Review changes in Audits → Approvals.`);
+    render();
+  },
   'task-new': () => openTaskModal(null),
   'task-edit': (el) => openTaskModal(S.tasks.find((t) => t.id === el.dataset.id)),
   'task-save': async () => {
@@ -312,7 +362,12 @@ function modalOrMain(sel) { return modalRoot.querySelector(sel) || main.querySel
 // Nested settings like digest.time are saved as a whole object.
 document.addEventListener('change', (e) => {
   const el = e.target;
-  if (el.dataset.change === 'task-done') { attempt(() => api.setTaskStatus(el.dataset.id, el.checked ? 'done' : 'todo')); return; }
+  if (el.dataset.change === 'task-select') { if (el.checked) taskSelection.add(el.dataset.id); else taskSelection.delete(el.dataset.id); render(); return; }
+  if (el.dataset.change === 'task-select-all') {
+    const shown = (window.tasksShownIds || []);
+    if (el.checked) shown.forEach((id) => taskSelection.add(id)); else shown.forEach((id) => taskSelection.delete(id));
+    render(); return;
+  }
   const key = el.dataset.settingObj;
   if (!key) return;
   const v = el.type === 'checkbox' ? el.checked : el.type === 'number' || key === 'gmail.scanMinutes' ? Number(el.value) : el.value;
