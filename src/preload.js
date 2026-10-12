@@ -135,6 +135,7 @@ contextBridge.exposeInMainWorld('api', {
   runAudit: (id) => invoke('audit:run', id),
   pickBriefFiles: () => invoke('brief:pickFiles'),
   runBrief: (opts) => invoke('brief:run', opts),
+  doTaskWithAI: (id, mode) => invoke('task:doWithAI', { id, mode }),
   stopAudit: (runId) => invoke('audit:stop', runId),
   decideApproval: (id, approve) => invoke('audit:decide', id, approve),
   decideApprovals: (ids, approve) => invoke('audit:decideAll', ids, approve),

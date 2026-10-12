@@ -10,6 +10,13 @@ const clientName = (id) => (S.clients.find((c) => c.id === id) || {}).name || ''
 /* global clientFilter */
 const inClientId = (id) => !clientFilter || !S.clients.find((c) => c.id === clientFilter) || clientFilter === id;
 const taskVisible = (t) => !clientFilter || !S.clients.find((c) => c.id === clientFilter) || t.clientId === clientFilter || (t.siteId && inClient(t.siteId));
+// The website a task applies to, if the AI can act on it: its own site, or the
+// client's only site.
+const taskSite = (t) => {
+  if (t.siteId) return (S.sites || []).find((x) => x.id === t.siteId) || null;
+  if (t.clientId) { const forC = (S.sites || []).filter((x) => x.clientId === t.clientId); if (forC.length === 1) return forC[0]; }
+  return null;
+};
 
 // ---------- Tasks ----------
 function viewTasks() {
@@ -35,6 +42,7 @@ function viewTasks() {
         </div>
         <div class="btn-row">
           ${t.emailThreadId ? `<button class="btn" data-action="task-reply" data-id="${t.id}">${t.replyDraftAt ? 'Draft again' : 'Draft reply'}</button><button class="btn ghost" data-action="link" data-url="${esc(t.link)}">Open email</button>` : ''}
+          ${t.status !== 'done' && taskSite(t) ? `<button class="btn" data-action="task-doai" data-id="${t.id}">Do with AI</button>` : ''}
           ${t.status === 'todo' ? `<button class="btn ghost" data-action="task-doing" data-id="${t.id}">Start</button>` : ''}
           <button class="btn ghost" data-action="task-edit" data-id="${t.id}">Edit</button>
           <button class="btn ghost danger" data-action="task-delete" data-id="${t.id}" aria-label="Delete task">Delete</button>
@@ -216,6 +224,16 @@ Object.assign(ACTIONS, {
     catch (e) { toast(cleanErr(e), 'error'); }
   },
   'task-doing': (el) => attempt(() => api.setTaskStatus(el.dataset.id, 'doing')),
+  'task-doai': async (el) => {
+    const t = S.tasks.find((x) => x.id === el.dataset.id);
+    const site = t && taskSite(t);
+    if (!site) { toast('Add a website to this task first (Edit).', 'error'); return; }
+    if (!(await confirmModal({ title: 'Let RCWriter do this task?', body: `The AI will work on “${t.title}” on ${site.name}. Changes are prepared for your approval (nothing goes live until you approve them in Audits).`, confirm: 'Do with AI' }))) return;
+    closeModal();
+    el.disabled = true;
+    try { await api.doTaskWithAI(el.dataset.id, 'approve'); toast('RCWriter is working on it. Review changes in Audits → Approvals.'); }
+    catch (e) { toast(cleanErr(e), 'error'); el.disabled = false; }
+  },
   'task-delete': (el) => attempt(() => api.deleteTasks(el.dataset.id), 'Task deleted'),
   'task-clear-done': async () => {
     const ids = S.tasks.filter((t) => t.status === 'done').map((t) => t.id);

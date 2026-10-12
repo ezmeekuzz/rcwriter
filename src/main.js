@@ -1227,14 +1227,10 @@ function registerIpc() {
     return r.canceled ? [] : r.filePaths.filter((f) => BRIEF_EXTS.includes(path.extname(f).toLowerCase()));
   });
 
-  handle('brief:run', async ({ siteId, text, files, mode } = {}) => {
+  // Shared by the Revise page and the "Do with AI" button on a task: build an
+  // ephemeral revision job from a brief and run it through the audit engine.
+  function startRevision({ site, brief, mode, name }) {
     const d = store.data;
-    const site = d.sites.find((x) => x.id === siteId);
-    if (!site) throw new Error('Choose a website to work on.');
-    const typed = String(text || '').trim();
-    const ex = await extractFiles(files || []);
-    const brief = [typed, ex.text].filter(Boolean).join('\n\n');
-    if (!brief.trim()) throw new Error(ex.errors.length ? `Couldn't read your file(s): ${ex.errors.join('; ')}` : 'Type your requirements or attach a document first.');
     const choice = assistantChoice();
     if (choice.provider !== 'chatgpt' && !choice.model) throw new Error('Set up your AI first in Settings → Assistant AI (or connect ChatGPT), so revisions can run.');
     if (choice.provider === 'chatgpt' && !(d.subscription.chatgpt && d.subscription.chatgpt.loggedIn)) throw new Error('Sign in to ChatGPT in AI providers, or set an API model in Settings → Assistant AI, so revisions can run.');
@@ -1252,8 +1248,8 @@ function registerIpc() {
     ].join('\n');
     const job = {
       id: `brief-${store.uid()}`,
-      name: `Brief — ${site.name} — ${new Date().toISOString().slice(0, 10)}`,
-      siteId, siteUrl,
+      name: name || `Brief — ${site.name} — ${new Date().toISOString().slice(0, 10)}`,
+      siteId: site.id, siteUrl,
       mode: theMode,
       provider: choice.provider,
       model: choice.model,
@@ -1264,7 +1260,45 @@ function registerIpc() {
       maxToolCalls: 80, maxChanges: 40, maxMinutes: 40
     };
     auditor.runJob(job).catch((e) => win?.webContents.send('toast', { msg: e.message, kind: 'error' }));
+    return job;
+  }
+
+  handle('brief:run', async ({ siteId, text, files, mode } = {}) => {
+    const d = store.data;
+    const site = d.sites.find((x) => x.id === siteId);
+    if (!site) throw new Error('Choose a website to work on.');
+    const typed = String(text || '').trim();
+    const ex = await extractFiles(files || []);
+    const brief = [typed, ex.text].filter(Boolean).join('\n\n');
+    if (!brief.trim()) throw new Error(ex.errors.length ? `Couldn't read your file(s): ${ex.errors.join('; ')}` : 'Type your requirements or attach a document first.');
+    startRevision({ site, brief, mode });
     return { started: true, warnings: ex.errors };
+  });
+
+  // Hand a task to the AI: it carries out the task on the task's website.
+  handle('task:doWithAI', ({ id, mode } = {}) => {
+    const d = store.data;
+    const task = (d.tasks || []).find((t) => t.id === id);
+    if (!task) throw new Error('Task not found.');
+    let site = task.siteId && d.sites.find((x) => x.id === task.siteId);
+    if (!site && task.clientId) {
+      const forClient = d.sites.filter((x) => x.clientId === task.clientId);
+      if (forClient.length === 1) site = forClient[0];
+    }
+    if (!site) throw new Error('This task isn\'t linked to a website. Click Edit, choose the website it applies to, then try again.');
+    const brief = [
+      `Task: ${task.title}`,
+      task.notes ? `Notes: ${task.notes}` : '',
+      task.priority ? `Priority: ${task.priority}` : '',
+      task.due ? `Due: ${task.due}` : '',
+      'This came from the RCWriter task list. Carry it out on the website, then report what you did.'
+    ].filter(Boolean).join('\n');
+    const job = startRevision({ site, brief, mode, name: `Task — ${String(task.title).slice(0, 50)}` });
+    task.status = 'doing';
+    task.aiRunJobId = job.id;
+    store.save();
+    broadcast();
+    return { started: true };
   });
 
   handle('audit:stop', (runId) => auditor.stop(runId));
