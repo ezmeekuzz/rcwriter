@@ -94,6 +94,23 @@ main:focus { outline: none; }
 .task-selall { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
 .task-selall input { width: 16px; height: 16px; }
 .task-bulk { display: inline-flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+
+/* Calendar */
+.cal-bar { display: flex; align-items: center; gap: 12px; margin: 6px 0 14px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.cal-head { margin-bottom: 6px; }
+.cal-dow { font-size: 12px; font-weight: 600; color: var(--ink-soft); text-align: center; padding: 2px 0; }
+.cal-cell { min-height: 92px; border: 1px solid var(--line); border-radius: var(--radius-s); padding: 4px 5px; background: var(--surface); cursor: pointer; overflow: hidden; }
+.cal-cell.empty { border: 0; background: transparent; cursor: default; }
+.cal-cell:hover:not(.empty) { border-color: var(--action); }
+.cal-cell.today { border-color: var(--action); box-shadow: inset 0 0 0 1px var(--action); }
+.cal-day { font-size: 12.5px; color: var(--ink-soft); text-align: right; margin-bottom: 2px; }
+.cal-cell.today .cal-day { color: var(--action); font-weight: 700; }
+.cal-events { display: flex; flex-direction: column; gap: 3px; }
+.cal-event { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; padding: 2px 6px; font: 500 11.5px/1.3 var(--ui); background: color-mix(in srgb, var(--action) 12%, var(--surface)); color: var(--ink); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-event.has-link { background: color-mix(in srgb, var(--ok) 16%, var(--surface)); }
+.cal-event .t { color: var(--ink-soft); font-weight: 600; }
+.inline-check { display: inline-flex; align-items: center; gap: 5px; margin-right: 6px; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 h1 { font: 600 28px/1.15 var(--display); margin: 0; letter-spacing: -.01em; }
 h2 { font-size: 15px; font-weight: 600; margin: 32px 0 10px; }

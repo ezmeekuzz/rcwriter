@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('api', {
   deleteTasks: (ids) => invoke('task:delete', ids),
   draftTaskReply: (id) => invoke('task:draftReply', id),
   runDigest: () => invoke('digest:run'),
+  saveEvent: (ev) => invoke('event:save', ev),
+  deleteEvent: (id) => invoke('event:delete', id),
   scanGmailNow: () => invoke('gmail:scanNow'),
   weeklyUpdateNow: (id) => invoke('client:weeklyNow', id),
   clientReportNow: (id, offset) => invoke('client:reportNow', id, offset),

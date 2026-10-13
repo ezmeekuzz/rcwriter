@@ -71,6 +71,7 @@ function defaults() {
     writers: [],
     schedules: [],
     articles: [],
+    events: [],
     activity: [],
     fired: {}
   };

@@ -34,6 +34,7 @@ const { createTelemetry } = require('./telemetry');
 const { createUpdates } = require('./updates');
 const { extractFiles, SUPPORTED: BRIEF_EXTS } = require('./extract');
 const { createSqlExport } = require('./sqlexport');
+const { createCalendar } = require('./calendar');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -79,6 +80,7 @@ let assistant = null;
 let telegram = null;
 let telemetry = null;
 let sqlExport = null;
+let calendar = null;
 let updates = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
@@ -295,6 +297,7 @@ function publicState() {
     autoFixCategories: AUTOFIX_CATEGORIES,
     images: { hasPexelsKey: !!(d.images && d.images.pexelsKey), model: (d.images && d.images.model) || 'gpt-image-1', hasOpenAiKey: !!store.getKey('openai') },
     schedules: d.schedules,
+    events: (d.events || []).slice(0, 2000),
     articles: d.articles.slice(0, 1000),
     activity: d.activity.slice(0, 80),
     upcoming: scheduler ? scheduler.upcoming(48) : [],
@@ -1465,6 +1468,8 @@ function registerIpc() {
     broadcast();
   });
   handle('task:draftReply', async (id) => { const r = await automation.draftReply(id); shell.openExternal(r.url); return r; });
+  handle('event:save', (ev) => { calendar.save(ev); return true; });
+  handle('event:delete', (id) => { calendar.remove(id); });
   handle('digest:run', () => automation.runDigest({ manual: true }));
   handle('gmail:scanNow', async () => { try { return await automation.scanClientEmails(); } finally { broadcast(); } });
   handle('client:weeklyNow', async (id) => {
@@ -1780,6 +1785,7 @@ if (gotLock) {
     setTimeout(() => updates.check(), 10 * 1000);
     setInterval(() => updates.check(), 6 * 60 * 60 * 1000);
     sqlExport = createSqlExport({ ai: assistantAi, memoryText: sites.memoryText });
+    calendar = createCalendar({ store, onChange: broadcast, notify: (t, b, link) => notify(t, b, link ? () => shell.openExternal(link) : undefined) });
     const crawler = createCrawler({ store, providers, ai: assistantAi, assistantChoice });
     leads = createLeads({ store, ai: assistantAi, guser, google, htmlToPdf, onChange: broadcast, addTask: (t) => automation.addTask(t), crawler,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
@@ -1798,8 +1804,8 @@ if (gotLock) {
         runDigest: () => automation.runDigest({ manual: true })
       }
     });
-    setInterval(() => { if (tampered) return; try { seo.tick(); webdev.tick(); leads.tick(); } catch (e) { console.error(e); } }, 60000);
-    setTimeout(() => { if (tampered) return; try { seo.tick(); webdev.tick(); } catch { /* next minute */ } }, 45000);
+    setInterval(() => { if (tampered) return; try { seo.tick(); webdev.tick(); leads.tick(); calendar.tick(); } catch (e) { console.error(e); } }, 60000);
+    setTimeout(() => { if (tampered) return; try { seo.tick(); webdev.tick(); calendar.tick(); } catch { /* next minute */ } }, 45000);
     automation.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }
     repairCodexIfNeeded();
