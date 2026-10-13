@@ -56,7 +56,25 @@ function classifyTool(tool) {
   return 'other';
 }
 
-const RESULT_LIMIT = 20000;
+const RESULT_LIMIT = 12000;
+// How many characters of tool-result text to keep in full in the running
+// conversation (most recent kept, older ones truncated). Bounds how large each
+// turn's request gets, which is the main cost driver in a long tool-using run.
+const HISTORY_BUDGET = 45000;
+const TRUNC_MARK = '\n[…earlier result truncated to save tokens — ask again if you still need it]';
+
+// Truncate the oldest tool outputs once the kept total passes the budget.
+// `get`/`set` read and write a message's tool-result text for each provider shape.
+function trimResults(items, get, set) {
+  let used = 0;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const cur = get(items[i]);
+    if (cur == null) continue;
+    const len = cur.length;
+    if (used >= HISTORY_BUDGET && len > 500 && !cur.endsWith(TRUNC_MARK)) set(items[i], cur.slice(0, 500) + TRUNC_MARK);
+    else used += len;
+  }
+}
 const guard = require('./hostguard');
 const slug = (s, n = 40) => String(s || 'audit').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, n) || 'audit';
 const pad = (n) => String(n).padStart(2, '0');
@@ -381,11 +399,29 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
     const over = () => run.stopped || Date.now() > deadline;
 
     if (job.provider === 'anthropic') {
+      // Prompt caching: the system prompt and the tools list are identical on
+      // every turn, so cache them and pay ~10% for them after the first call.
+      // A rolling cache breakpoint on the latest results keeps re-sent history
+      // cheap too. This cuts Claude API cost on a long audit dramatically.
+      const sys = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
       const tools = run.tools.map((t) => ({ name: t.exposed, description: t.description, input_schema: t.schema }));
+      if (tools.length) tools[tools.length - 1] = { ...tools[tools.length - 1], cache_control: { type: 'ephemeral' } };
       const messages = [{ role: 'user', content: task }];
+      const trim = () => {
+        const blocks = [];
+        for (const m of messages) if (m.role === 'user' && Array.isArray(m.content)) for (const b of m.content) if (b.type === 'tool_result') blocks.push(b);
+        trimResults(blocks, (b) => (typeof b.content === 'string' ? b.content : null), (b, v) => { b.content = v; });
+      };
+      const rollCache = () => {
+        for (const m of messages) if (Array.isArray(m.content)) for (const b of m.content) if (b.cache_control) delete b.cache_control;
+        const last = messages[messages.length - 1];
+        if (last && Array.isArray(last.content) && last.content.length) last.content[last.content.length - 1].cache_control = { type: 'ephemeral' };
+      };
       for (let turn = 0; turn < maxTurns && !over(); turn++) {
+        trim();
+        rollCache();
         const j = await req('https://api.anthropic.com/v1/messages', { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-          { model: job.model, max_tokens: 8000, system, tools, messages });
+          { model: job.model, max_tokens: 8000, system: sys, tools, messages });
         messages.push({ role: 'assistant', content: j.content });
         const uses = (j.content || []).filter((b) => b.type === 'tool_use');
         if (j.stop_reason !== 'tool_use' || !uses.length) return (j.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
@@ -405,6 +441,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       const tools = run.tools.map((t) => ({ type: 'function', function: { name: t.exposed, description: t.description, parameters: t.schema } }));
       const messages = [{ role: 'system', content: system }, { role: 'user', content: task }];
       for (let turn = 0; turn < maxTurns && !over(); turn++) {
+        trimResults(messages.filter((m) => m.role === 'tool'), (m) => (typeof m.content === 'string' ? m.content : null), (m, v) => { m.content = v; });
         const j = await req(`${base}/chat/completions`, headers, { model: job.model, messages, tools });
         const m = ((j.choices || [])[0] || {}).message || {};
         messages.push({ role: 'assistant', content: m.content || null, tool_calls: m.tool_calls });
@@ -423,6 +460,9 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
       const tools = [{ functionDeclarations: run.tools.map((t) => ({ name: t.exposed, description: t.description, parameters: geminiSchema(t.schema) })) }];
       const contents = [{ role: 'user', parts: [{ text: task }] }];
       for (let turn = 0; turn < maxTurns && !over(); turn++) {
+        const frParts = [];
+        for (const c of contents) if (Array.isArray(c.parts)) for (const pp of c.parts) if (pp.functionResponse) frParts.push(pp);
+        trimResults(frParts, (p) => (p.functionResponse.response && typeof p.functionResponse.response.content === 'string' ? p.functionResponse.response.content : null), (p, v) => { p.functionResponse.response.content = v; });
         const j = await req(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(job.model)}:generateContent`, { 'x-goog-api-key': key },
           { systemInstruction: { parts: [{ text: system }] }, contents, tools });
         const cand = (j.candidates || [])[0];
@@ -468,7 +508,7 @@ function createAuditor({ store, connectors, builtins, providers, codex, codexCmd
 
   // ---------- public ----------
   async function runJob(jobIn, { kind = 'audit', schedule = null, context = '', chainDepth = 0 } = {}) {
-    const job = { maxToolCalls: 60, maxChanges: 25, maxMinutes: 30, ...jobIn, ...(context ? { context } : {}) };
+    const job = { maxToolCalls: 40, maxChanges: 25, maxMinutes: 30, ...jobIn, ...(context ? { context } : {}) };
     if (!(job.connectorIds || []).length && !builtins.sources(job).length) throw new Error('Choose a website or at least one connection for this audit.');
     if ([...runs.values()].some((r) => r.job.id === job.id && kind === 'audit')) throw new Error(`"${job.name}" is already running.`);
 
