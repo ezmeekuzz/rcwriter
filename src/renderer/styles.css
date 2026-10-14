@@ -111,6 +111,11 @@ main:focus { outline: none; }
 .cal-event.has-link { background: color-mix(in srgb, var(--ok) 16%, var(--surface)); }
 .cal-event .t { color: var(--ink-soft); font-weight: 600; }
 .inline-check { display: inline-flex; align-items: center; gap: 5px; margin-right: 6px; }
+
+/* Keep long keyword lists from stretching the page */
+.rank-scroll { max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-s); }
+.rank-scroll table.data { margin: 0; }
+table.data.sticky thead th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 h1 { font: 600 28px/1.15 var(--display); margin: 0; letter-spacing: -.01em; }
 h2 { font-size: 15px; font-weight: 600; margin: 32px 0 10px; }
