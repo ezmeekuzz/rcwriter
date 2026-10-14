@@ -5,7 +5,7 @@
 
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n)}…` : s; };
 
-function createAssistant({ store, auditor, builtins, actions, assistantChoice, onChange, notify }) {
+function createAssistant({ store, auditor, builtins, actions, assistantChoice, onChange, notify, brain = null }) {
   const d = () => store.data;
   const find = (list, ref) => {
     const r = String(ref || '').trim().toLowerCase();
@@ -91,12 +91,15 @@ function createAssistant({ store, auditor, builtins, actions, assistantChoice, o
   async function ask(text, { history = true, name = 'Ask RCWriter' } = {}) {
     const c = assistantChoice();
     const prev = history ? (d().assistantChats || []).slice(0, 3).reverse().map((x) => `User: ${x.q}\nYou: ${clip(x.a, 800)}`).join('\n\n') : '';
-    const system = `You are RCWriter's assistant for ${d().settings.senderName || 'the owner'}, a freelance SEO specialist, web developer and lead generation specialist. You act through RCWriter's tools: start audits and writers, create reports, drafts and tasks, look up rankings, site health and Google data, and manage leads. Use real data from the tools; never guess numbers. Changes to websites only happen through saved audits, which follow their own approval settings. When something can't be done with the tools, say so plainly. Today is ${new Date().toDateString()}.`;
-    const task = `${prev ? `Earlier in this conversation:\n${prev}\n\n` : ''}Request: ${text}\n\nDo it now with the tools, then reply briefly in Markdown: what you did or found, with the key numbers.`;
+    let system = `You are RCWriter's assistant for ${d().settings.senderName || 'the owner'}, a freelance SEO specialist, web developer and lead generation specialist. You act through RCWriter's tools: start audits and writers, create reports, drafts and tasks, look up rankings, site health and Google data, and manage leads. Use real data from the tools; never guess numbers. Changes to websites only happen through saved audits, which follow their own approval settings. When something can't be done with the tools, say so plainly. Today is ${new Date().toDateString()}.`;
+    let mem = { text: '' };
+    if (brain) { try { mem = brain.recall({ task: text }); } catch { mem = { text: '' }; } if (brain.SYSTEM_INSTRUCTION) system += `\n\n${brain.SYSTEM_INSTRUCTION}`; }
+    const task = `${mem.text ? `${mem.text}\n\n` : ''}${prev ? `Earlier in this conversation:\n${prev}\n\n` : ''}Request: ${text}\n\nDo it now with the tools, then reply briefly in Markdown: what you did or found, with the key numbers.`;
     const started = Date.now();
     const r = await auditor.research({ name, siteId: '', siteUrl: '', connectorIds: [], builtinKinds: [], provider: c.provider, model: c.model, system, task, maxToolCalls: 25, maxMinutes: 15, extraTools: tools(), requireTools: false });
     const rec = { id: store.uid(), at: new Date().toISOString(), q: text, a: r.text || '(no answer)', toolCalls: r.toolCalls, seconds: Math.round((Date.now() - started) / 1000) };
     if (history) d().assistantChats = [rec, ...(d().assistantChats || [])].slice(0, 50);
+    if (brain) { try { brain.log({ type: 'suggestion', summary: `Ask: ${text}`.slice(0, 200), reasoning: clip(rec.a, 400), importance: 3, tags: ['ask'] }); } catch { /* ignore */ } }
     store.save();
     onChange();
     return rec;

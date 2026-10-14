@@ -108,6 +108,16 @@ Also: **proposals** as Word/PDF from a lead's findings and your services and pri
 
 **Writers use site data:** with a WordPress site selected, a writer reads the site's published posts so it doesn't repeat them and links to related ones. With Search Console linked, it aims articles at searches the site already appears for but isn't in the top 3 for yet.
 
+## AI memory (2.5)
+
+**Workspace → AI memory.** RCWriter keeps a persistent memory of what its AI did, decided and suggested across sessions, so it stays consistent and learns from what worked instead of starting fresh every time.
+
+- **Recorded automatically** at high-signal moments: audits, brief revisions and tasks it runs; approvals and rejections you make; and answers from Ask RCWriter. Each memory stores a short summary, the reasoning behind it, the outcome (pending, accepted, rejected, succeeded, failed), tags and an importance score.
+- **Recalled into later AI work.** Before an audit, revision or Ask request, the most relevant past memories (recent ones from this session plus the best matches ranked by keyword overlap, importance and recency) are added to the AI's prompt as a short "Relevant memory from past sessions" block, capped to about 1,500 tokens so it never bloats the request. The AI is told to use it to avoid repeating things you rejected, build on what worked, and follow your current request when it conflicts with memory.
+- **Lessons.** Older low-value memories are periodically distilled by the Assistant AI into a handful of durable "lessons" (your preferences, what worked, what to avoid) and the originals are archived. You can also press **Make lessons** to do it now.
+- **Your control.** Browse and search everything, change an entry's importance, delete single entries, **Pause recording**, **Forget all**, or **Export** the whole memory to a JSON file.
+- **Private and safe.** Everything lives in your normal local data file — no cloud, no database. API keys, tokens and other secrets are stripped out before anything is written.
+
 ## Site audits
 
 A separate module (sidebar: **Site audits → Audits**) that checks your websites on a schedule using tools you connect, and fixes problems as far as you allow.
@@ -247,6 +257,8 @@ src/capture.js     Page screenshots for visual checks
 src/crawler.js     Lead discovery, website reading, texts and WhatsApp
 src/leads.js       Lead crawlers, outreach sequences, enquiries and proposals
 src/assistant.js   Ask RCWriter and playbooks
+src/aibrain.js     Persistent AI memory: recording, recall, lessons, redaction
+src/calendar.js    Scheduling calendar, meeting links and reminders
 src/telegram.js    Phone alerts
 src/lock.js        App password
 src/codex-install.js  One-click Codex download

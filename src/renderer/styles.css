@@ -433,3 +433,15 @@ table.kvtable td { padding: 5px 0; border-bottom: 1px solid var(--line); }
 .owner-mark strong { color: var(--ink); font-weight: 600; }
 .gate .owner-mark.gate-owner { display: inline-block; margin-top: 22px; border-top: 0; font-size: 12.5px; }
 body.gated .sidebar .owner-mark { display: none; }
+
+/* AI memory panel */
+.mem-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.mem-bar input[type=search] { flex: 1; min-width: 180px; }
+.mem-list { display: flex; flex-direction: column; gap: 10px; }
+.mem-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-m); }
+.mem-main { flex: 1; min-width: 0; }
+.mem-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
+.mem-summary { font-size: 13.5px; font-weight: 600; margin-bottom: 2px; }
+.mem-imp { color: var(--marigold-text); font-size: 12px; letter-spacing: 1px; }
+.mem-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+.chip.small { font-size: 11px; padding: 1px 7px; }

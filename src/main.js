@@ -35,6 +35,7 @@ const { createUpdates } = require('./updates');
 const { extractFiles, SUPPORTED: BRIEF_EXTS } = require('./extract');
 const { createSqlExport } = require('./sqlexport');
 const { createCalendar } = require('./calendar');
+const { createBrain } = require('./aibrain');
 const os = require('os');
 const { createGoogle } = require('./google');
 const { createBuiltins } = require('./builtin');
@@ -81,6 +82,8 @@ let telegram = null;
 let telemetry = null;
 let sqlExport = null;
 let calendar = null;
+let brain = null;
+const brainSession = crypto.randomBytes(6).toString('hex');
 let updates = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
@@ -312,6 +315,7 @@ function publicState() {
     owner: ownership.OWNER,
     website: ownership.WEBSITE,
     telemetry: telemetry ? telemetry.status() : { configured: false, enabled: true },
+    brain: brain ? brain.status() : { count: 0, archived: 0, paused: false, lastConsolidated: null },
     ...(updates ? updates.status() : { update: null, announce: null })
   };
 }
@@ -349,6 +353,23 @@ function assistantChoice() {
   const w = d.writers.find((x) => x.provider && (x.provider === 'chatgpt' || store.getKey(x.provider)));
   if (w) return { provider: w.provider, model: w.model || '' };
   return { provider: 'chatgpt', model: '' };
+}
+
+// Record a finished audit / revision / task in the AI brain.
+function logAuditToBrain(job, rec, text) {
+  if (!brain) return;
+  try {
+    const kind = String(job.id || '').startsWith('brief-') ? (/^Task —/.test(job.name || '') ? 'task' : 'revision') : 'audit';
+    brain.log({
+      type: 'action',
+      summary: `${kind === 'task' ? 'Did task' : kind === 'revision' ? 'Revised' : 'Audited'} ${job.siteUrl || job.name}: ${rec.applied || 0} applied, ${rec.queued || 0} queued`.slice(0, 200),
+      reasoning: String(rec.summary || '').slice(0, 400),
+      details: { jobName: job.name, mode: job.mode, applied: rec.applied, queued: rec.queued, failed: rec.failed },
+      outcome: rec.status === 'done' ? 'succeeded' : 'failed',
+      importance: rec.applied ? 4 : 3,
+      tags: ['audit', kind, ...(job.siteUrl ? [job.siteUrl] : [])]
+    });
+  } catch { /* ignore */ }
 }
 
 function assistantAi(o) {
@@ -491,6 +512,7 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
       await pipeline.afterWrite(writer, article, note);
     }
     d.articles.unshift(article);
+    if (brain) { try { const st = d.sites.find((x) => x.id === writer.siteId); brain.log({ type: 'action', summary: `Wrote "${article.title}" (${article.words} words) with ${writer.name}`.slice(0, 200), reasoning: article.keyword ? `Targeted keyword "${article.keyword.keyword}".` : '', details: { writer: writer.name, words: article.words, site: st ? st.name : '' }, outcome: 'succeeded', importance: 3, tags: ['article', writer.name].concat(st ? [st.name] : []) }); } catch { /* ignore */ } }
     store.log('article', `${writer.name} wrote "${article.title}" (${article.words} words).`, { articleId: article.id });
     if (article.truncated) store.log('info', `"${article.title}" hit the max output length and may be cut off. Raise "Max output tokens" for ${writer.name}.`);
     store.save();
@@ -1385,11 +1407,28 @@ function registerIpc() {
   });
 
   handle('audit:stop', (runId) => auditor.stop(runId));
-  handle('audit:decide', (id, approve) => auditor.decide(id, approve));
+  const logDecision = (a, approve) => {
+    if (!brain || !a) return;
+    try { brain.log({ type: 'user_feedback', summary: `${approve ? 'Approved' : 'Rejected'}: ${a.tool}${a.reason ? ` — ${a.reason}` : ''}`.slice(0, 200), reasoning: `On ${a.siteUrl || a.jobName || 'a site'}.`, outcome: approve ? 'accepted' : 'rejected', importance: approve ? 3 : 4, tags: ['approval', a.tool].concat(a.siteUrl ? [a.siteUrl] : []) }); } catch { /* ignore */ }
+  };
+  handle('audit:decide', async (id, approve) => { const a = store.data.approvals.find((x) => x.id === id); const r = await auditor.decide(id, approve); logDecision(a, approve); return r; });
   handle('audit:decideAll', async (ids, approve) => {
     let ok = 0; const errors = [];
-    for (const id of ids) { try { await auditor.decide(id, approve); ok += 1; } catch (e) { errors.push(e.message); } }
+    for (const id of ids) { const a = store.data.approvals.find((x) => x.id === id); try { await auditor.decide(id, approve); logDecision(a, approve); ok += 1; } catch (e) { errors.push(e.message); } }
     return { ok, errors };
+  });
+  handle('brain:list', ({ q = '', type = '', limit = 200 } = {}) => (brain ? brain.search({ q, type, limit }) : []));
+  handle('brain:edit', (id, patch) => { if (brain) brain.edit(id, patch || {}); return true; });
+  handle('brain:delete', (ids) => { if (brain) brain.remove(ids); return true; });
+  handle('brain:forget', (opts) => { if (brain) brain.forget(opts || { all: true }); return true; });
+  handle('brain:pause', (on) => { if (brain) brain.setPaused(on); return true; });
+  handle('brain:consolidate', async () => (brain ? brain.consolidate({ force: true }) : { made: 0 }));
+  handle('brain:export', async () => {
+    if (!brain) throw new Error('Memory is not available.');
+    const res = await dialog.showSaveDialog(win, { title: 'Export AI memory', defaultPath: `rcwriter-ai-memory-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (res.canceled || !res.filePath) return { saved: false };
+    fs.writeFileSync(res.filePath, brain.exportAll(), 'utf8');
+    return { saved: true, path: res.filePath };
   });
   handle('audit:revert', (changeId) => auditor.revert(changeId));
   handle('audit:readReport', (runId) => {
@@ -1746,10 +1785,12 @@ if (gotLock) {
     google = createGoogle({ store, openExternal: (u) => shell.openExternal(u) });
     guser = createGoogleUser({ store, openExternal: (u) => shell.openExternal(u) });
     builtins = createBuiltins({ store, google, guser, socialTools: () => (distribution ? distribution.tools() : []), visualTools: (s) => (webdev ? webdev.visualTools(s) : []) });
+    brain = createBrain({ store, ai: assistantAi, sessionId: brainSession, onChange: broadcast });
     auditor = createAuditor({
       store, connectors: connectorMgr, builtins, providers, codex, codexCmd, codexProblem, onChange: broadcast,
       siteMemory: (siteId) => { const s = store.data.sites.find((x) => x.id === siteId); return s ? sites.memoryText(s) : ''; },
-      afterRun: (job, rec, text) => automation.afterAudit(job, rec, text),
+      memory: { instruction: brain.SYSTEM_INSTRUCTION, recall: (job) => brain.recall({ task: `${job.name || ''} ${job.instructions || ''}`.slice(0, 600) }).text },
+      afterRun: (job, rec, text) => { logAuditToBrain(job, rec, text); return automation.afterAudit(job, rec, text); },
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
       paths: {
         execPath: () => process.execPath,
@@ -1790,7 +1831,7 @@ if (gotLock) {
     leads = createLeads({ store, ai: assistantAi, guser, google, htmlToPdf, onChange: broadcast, addTask: (t) => automation.addTask(t), crawler,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     assistant = createAssistant({
-      store, auditor, builtins, assistantChoice, onChange: broadcast,
+      store, auditor, builtins, assistantChoice, onChange: broadcast, brain,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
       actions: {
         runAudit: (job, note) => auditor.runJob(job, { context: note ? `Requested through Ask RCWriter: ${note}` : '' }).catch((e) => store.log('error', `Audit "${job.name}" could not start: ${e.message}`)),
@@ -1804,6 +1845,7 @@ if (gotLock) {
         runDigest: () => automation.runDigest({ manual: true })
       }
     });
+    setTimeout(() => { if (tampered || !brain) return; brain.consolidate().catch(() => {}); }, 60 * 1000);
     setInterval(() => { if (tampered) return; try { seo.tick(); webdev.tick(); leads.tick(); calendar.tick(); } catch (e) { console.error(e); } }, 60000);
     setTimeout(() => { if (tampered) return; try { seo.tick(); webdev.tick(); calendar.tick(); } catch { /* next minute */ } }, 45000);
     automation.start();

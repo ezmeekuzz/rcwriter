@@ -149,6 +149,14 @@ contextBridge.exposeInMainWorld('api', {
   readAuditReport: (runId) => invoke('audit:readReport', runId),
   revealAuditReport: (runId) => invoke('audit:revealReport', runId),
 
+  brainList: (opts) => invoke('brain:list', opts),
+  brainEdit: (id, patch) => invoke('brain:edit', id, patch),
+  brainDelete: (ids) => invoke('brain:delete', ids),
+  brainForget: (opts) => invoke('brain:forget', opts),
+  brainPause: (on) => invoke('brain:pause', on),
+  brainConsolidate: () => invoke('brain:consolidate'),
+  brainExport: () => invoke('brain:export'),
+
   readArticle: (id) => invoke('article:read', id),
   deleteArticle: (id, removeFile) => invoke('article:delete', id, removeFile),
   revealArticle: (id) => invoke('article:reveal', id),
