@@ -13,10 +13,11 @@ const EXPECTED_CTR = [0, 28, 15, 10, 7, 5, 4, 3, 2.5, 2.2, 2, 1.4, 1.2, 1, 0.9, 
 const expectedCtr = (pos) => EXPECTED_CTR[Math.max(1, Math.min(15, Math.round(pos)))] || 0.7;
 const dueAt = (t) => { const [h, m] = String(t).split(':').map(Number); const x = new Date(); x.setHours(h || 0, m || 0, 0, 0); return x; };
 
-function createSeo({ store, google, ai, builtins, auditor, notify, onChange, queueAction, addTask, postsFor }) {
+function createSeo({ store, google, ai, builtins, auditor, notify, onChange, queueAction, addTask, postsFor, refresh }) {
   const d = () => store.data;
   const st = () => d().autoState || (d().autoState = {});
-  const cfg = (site) => ({ keywords: [], rankAlerts: true, indexWatch: true, titleTests: { enabled: false, mode: 'approve', maxActive: 3 }, ...(site.seo || {}) });
+  const cfg = (site) => ({ keywords: [], rankAlerts: true, indexWatch: true, titleTests: { enabled: false, mode: 'approve', maxActive: 3 },
+    contentDecay: { enabled: false, mode: 'approve', dropPct: 30, minClicks: 10, maxPerRun: 2, cooldownDays: 45 }, ...(site.seo || {}) });
   const busy = new Set();
   const gsc = (site) => site.google && site.google.gscSite && google.configured() ? site.google.gscSite : null;
 
@@ -203,6 +204,115 @@ function createSeo({ store, google, ai, builtins, auditor, notify, onChange, que
     onChange();
   }
 
+  // ---------- content decay: refresh pages that are losing search traffic ----------
+  async function pagesPerf(prop, start, end) {
+    const r = await google.gscPerformance(prop, { dimensions: ['page'], startDate: start, endDate: end, rowLimit: 1000 });
+    const map = new Map();
+    for (const x of r.rows || []) map.set(x.keys[0].replace(/\/+$/, ''), { clicks: x.clicks, impressions: x.impressions, ctr: x.ctr, position: x.position });
+    return map;
+  }
+
+  // Compare the last 28 days of Search Console page traffic with the 28 before
+  // it, find pages that have lost clicks (content decay), and refresh the worst
+  // offenders through the revise engine. Respects a per-page cooldown so the
+  // same URL isn't refreshed repeatedly.
+  async function checkDecay(site, { manual = false } = {}) {
+    const prop = gsc(site);
+    const c = cfg(site);
+    if (!prop) { if (manual) throw new Error('Link Search Console to this website first.'); return { found: 0 }; }
+    if (!manual && !c.contentDecay.enabled) return { found: 0 };
+    const dropPct = Math.max(10, Math.min(90, Number(c.contentDecay.dropPct) || 30));
+    const minClicks = Math.max(1, Number(c.contentDecay.minClicks) || 10);
+    const maxPerRun = Math.max(1, Math.min(10, Number(c.contentDecay.maxPerRun) || 2));
+    const cooldown = Math.max(7, Number(c.contentDecay.cooldownDays) || 45) * DAY;
+
+    const recent = await pagesPerf(prop, iso(Date.now() - 30 * DAY), iso(Date.now() - 2 * DAY));
+    const prior = await pagesPerf(prop, iso(Date.now() - 58 * DAY), iso(Date.now() - 31 * DAY));
+    const log = d().contentRefreshes || (d().contentRefreshes = []);
+    const lastFor = (url) => log.filter((x) => x.siteId === site.id && x.url === url).sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))[0];
+
+    const decayed = [];
+    for (const [url, p] of prior) {
+      if (p.clicks < minClicks) continue;
+      const now = recent.get(url) || { clicks: 0, impressions: 0, ctr: 0, position: null };
+      const lostClicks = p.clicks - now.clicks;
+      const clicksDrop = p.clicks ? (lostClicks / p.clicks) * 100 : 0;
+      const posWorse = p.position && now.position ? now.position - p.position : 0;
+      const decaying = clicksDrop >= dropPct || (posWorse >= 3 && now.clicks < p.clicks);
+      if (!decaying) continue;
+      const prev = lastFor(url);
+      if (prev && Date.now() - new Date(prev.startedAt) < cooldown) continue; // still cooling down
+      decayed.push({ url, prior: p, recent: now, lostClicks, clicksDrop: Math.round(clicksDrop), posWorse: Math.round(posWorse) });
+    }
+    decayed.sort((a, b) => b.lostClicks - a.lostClicks);
+    st()[`decay:${site.id}`] = today();
+
+    const picked = decayed.slice(0, maxPerRun);
+    const started = [];
+    for (const item of picked) {
+      let queries = [];
+      try {
+        const q = await google.gscPerformance(prop, { dimensions: ['query'], startDate: iso(Date.now() - 58 * DAY), endDate: iso(Date.now() - 2 * DAY), pageContains: item.url, rowLimit: 8 });
+        queries = (q.rows || []).sort((a, b) => b.impressions - a.impressions).slice(0, 8).map((x) => x.keys[0]);
+      } catch { /* queries are a nice-to-have */ }
+      const title = item.url.replace(/^https?:\/\//, '').replace(/\/+$/, '').split('/').pop() || item.url;
+      const brief = [
+        `This existing page has been losing search traffic and needs a refresh — do NOT create a new page, and keep its URL unchanged.`,
+        `Page: ${item.url}`,
+        `Search Console: clicks fell from ${item.prior.clicks} to ${item.recent.clicks} over the last 28 days vs the 28 before${item.posWorse >= 3 ? `, and its average position slipped by about ${item.posWorse}` : ''}.`,
+        queries.length ? `It earns impressions for these searches, so make sure the page answers them well: ${queries.join(', ')}.` : '',
+        'Refresh it: update anything outdated (facts, stats, years, prices, screenshots), expand thin or shallow sections with genuinely useful detail, tighten the introduction, improve headings and the title/meta for the searches above, add or update an FAQ and structured data where it helps, and fix broken or stale links. Keep the existing structure, tone and internal links intact; make no unrelated changes.'
+      ].filter(Boolean).join('\n');
+
+      let jobId = null;
+      try {
+        const job = refresh ? refresh(site, { url: item.url, title, brief, mode: c.contentDecay.mode || 'approve' }) : null;
+        jobId = job && job.id;
+      } catch (e) { item.error = e.message; }
+      const rec = { id: store.uid(), siteId: site.id, url: item.url, title, startedAt: new Date().toISOString(),
+        baseline: { clicks: item.prior.clicks, position: item.prior.position }, recentAtStart: { clicks: item.recent.clicks, position: item.recent.position },
+        lostClicks: item.lostClicks, clicksDrop: item.clicksDrop, queries, mode: c.contentDecay.mode || 'approve', jobId, status: jobId ? 'refreshing' : 'failed', error: item.error || null };
+      log.unshift(rec);
+      if (jobId) started.push(rec);
+    }
+    d().contentRefreshes = log.slice(0, 500);
+
+    if (started.length) {
+      const names = started.map((r) => clip(r.title, 40)).join(', ');
+      notify(`Content refresh: ${site.name}`, `${started.length} decaying page${started.length > 1 ? 's' : ''} being refreshed (${names})${(c.contentDecay.mode || 'approve') === 'auto' ? '' : ' — waiting for your approval'}.`,
+        { view: 'audits', tab: (c.contentDecay.mode || 'approve') === 'auto' ? 'rankings' : 'approvals' });
+      store.log('info', `${site.name}: refreshing ${started.length} page${started.length > 1 ? 's' : ''} that lost search traffic.`);
+    } else if (manual) {
+      store.log('info', `${site.name}: no decaying pages found that need a refresh right now.`);
+    }
+    store.save();
+    onChange();
+    return { found: decayed.length, started: started.length };
+  }
+
+  // 30+ days after a refresh, check whether the page's traffic recovered.
+  async function evaluateRefreshes() {
+    const log = d().contentRefreshes || [];
+    for (const r of log) {
+      if (r.status !== 'refreshing' || r.evaluatedAt || Date.now() - new Date(r.startedAt) < 32 * DAY) continue;
+      const site = d().sites.find((x) => x.id === r.siteId);
+      const prop = site && gsc(site);
+      if (!prop) continue;
+      try {
+        const after = await pageStats(prop, r.url, iso(Date.now() - 30 * DAY), iso(Date.now() - 2 * DAY));
+        r.after = { clicks: after.clicks, position: after.position };
+        r.evaluatedAt = new Date().toISOString();
+        const base = (r.recentAtStart && r.recentAtStart.clicks) || 0;
+        const recovered = after.clicks >= Math.max(r.baseline.clicks * 0.9, base * 1.2);
+        r.status = recovered ? 'recovered' : 'no change';
+        notify(`Refresh ${recovered ? 'recovered traffic' : 'didn\'t recover yet'}: ${site.name}`,
+          `"${clip(r.title, 50)}" — clicks ${base} → ${after.clicks} (was ${r.baseline.clicks} before the decline).`, { view: 'audits', tab: 'rankings' });
+      } catch { /* try again next week */ }
+    }
+    store.save();
+    onChange();
+  }
+
   // ---------- topic maps ----------
   async function planTopics(writer, { count = 12 } = {}) {
     const site = d().sites.find((x) => x.id === writer.siteId) || null;
@@ -263,11 +373,13 @@ function createSeo({ store, google, ai, builtins, auditor, notify, onChange, que
       if (c.keywords.length && st()[`ranks:${s.id}`] !== today() && now >= dueAt('07:00')) { st()[`ranks:${s.id}`] = today(); once(`Rank tracking:${s.id}`, () => checkRanks(s)); }
       if ((D.indexWatch || []).some((x) => x.siteId === s.id && x.status !== 'indexed') && st()[`index:${s.id}`] !== today() && now >= dueAt('11:00')) { st()[`index:${s.id}`] = today(); once(`Indexing watch:${s.id}`, () => checkIndexing(s)); }
       if (c.titleTests.enabled && now.getDay() === 1 && st()[`titletests:${s.id}`] !== today() && now >= dueAt('09:30')) { st()[`titletests:${s.id}`] = today(); once(`Title tests:${s.id}`, () => startTitleTests(s)); }
+      if (c.contentDecay.enabled && now.getDay() === 2 && st()[`decay:${s.id}`] !== today() && now >= dueAt('10:00')) { st()[`decay:${s.id}`] = today(); once(`Content decay:${s.id}`, () => checkDecay(s)); }
     }
     if ((D.titleTests || []).some((t) => ['running', 'waiting'].includes(t.status)) && st().titleEval !== today()) { st().titleEval = today(); once('Title test results', () => evaluateTitleTests()); }
+    if ((D.contentRefreshes || []).some((r) => r.status === 'refreshing') && st().decayEval !== today()) { st().decayEval = today(); once('Refresh results', () => evaluateRefreshes()); }
   }
 
-  return { tick, checkRanks, suggestKeywords, watchUrl, checkIndexing, startTitleTests, evaluateTitleTests, planTopics, nextPlanned, expectedCtr };
+  return { tick, checkRanks, suggestKeywords, watchUrl, checkIndexing, startTitleTests, evaluateTitleTests, checkDecay, evaluateRefreshes, planTopics, nextPlanned, expectedCtr };
 }
 
 module.exports = { createSeo, expectedCtr };

@@ -84,6 +84,7 @@ let sqlExport = null;
 let calendar = null;
 let brain = null;
 const brainSession = crypto.randomBytes(6).toString('hex');
+let startRevisionFn = null; // set in registerIpc; used by SEO content-decay refresh
 let updates = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
@@ -271,6 +272,7 @@ function publicState() {
     seoBySite: Object.fromEntries(d.sites.map((x) => [x.id, seoSummary(x)])),
     indexWatch: (d.indexWatch || []).slice(0, 300),
     titleTests: (d.titleTests || []).slice(0, 200),
+    contentRefreshes: (d.contentRefreshes || []).slice(0, 200),
     webdevBySite: webdev ? Object.fromEntries(d.sites.map((x) => [x.id, webdev.status(x.id)])) : {},
     leads: (d.leads || []).slice(0, 3000),
     campaigns: d.campaigns || [],
@@ -424,7 +426,8 @@ function seoSummary(site) {
     const week = h.filter((x) => last && new Date(x.date) <= new Date(Date.parse(last.date) - 6 * 864e5)).pop();
     return { keyword: kw, position: last ? last.position : null, clicks: last ? last.clicks : null, weekAgo: week ? week.position : null, history: h.slice(-30).map((x) => x.position) };
   });
-  return { keywords, rankAlerts: c.rankAlerts !== false, indexWatch: c.indexWatch !== false, titleTests: { enabled: false, mode: 'approve', maxActive: 3, ...(c.titleTests || {}) } };
+  return { keywords, rankAlerts: c.rankAlerts !== false, indexWatch: c.indexWatch !== false, titleTests: { enabled: false, mode: 'approve', maxActive: 3, ...(c.titleTests || {}) },
+    contentDecay: { enabled: false, mode: 'approve', dropPct: 30, minClicks: 10, maxPerRun: 2, cooldownDays: 45, ...(c.contentDecay || {}) } };
 }
 
 // Puts an action in the approval queue, or runs it now when mode is 'auto'.
@@ -1367,6 +1370,7 @@ function registerIpc() {
     auditor.runJob(job).catch((e) => win?.webContents.send('toast', { msg: e.message, kind: 'error' }));
     return job;
   }
+  startRevisionFn = startRevision;
 
   handle('brief:run', async ({ siteId, text, files, mode } = {}) => {
     const d = store.data;
@@ -1581,6 +1585,7 @@ function registerIpc() {
   handle('seo:watchUrl', (id, url) => { const s = siteById(id); seo.watchUrl(s, sites.normalizeUrl(url)); store.save(); broadcast(); });
   handle('seo:removeWatch', (wid) => { store.data.indexWatch = (store.data.indexWatch || []).filter((x) => x.id !== wid); store.save(); broadcast(); });
   handle('seo:startTitleTests', async (id) => { try { return await seo.startTitleTests(siteById(id)); } finally { broadcast(); } });
+  handle('seo:checkDecay', async (id) => { try { return await seo.checkDecay(siteById(id), { manual: true }); } finally { broadcast(); } });
   handle('writer:planTopics', async (id, count) => {
     const w = store.data.writers.find((x) => x.id === id);
     if (!w) throw new Error('Writer not found.');
@@ -1817,6 +1822,7 @@ if (gotLock) {
     scheduler.start();
     monitor.start();
     seo = createSeo({ store, google, ai: assistantAi, builtins, auditor, onChange: broadcast, queueAction, addTask: (t) => automation.addTask(t), postsFor,
+      refresh: (site, opts) => (startRevisionFn ? startRevisionFn({ site, brief: opts.brief, mode: opts.mode, name: `Refresh — ${String(opts.title).slice(0, 50)}` }) : null),
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     webdev = createWebdev({ store, google, onChange: broadcast, addTask: (t) => automation.addTask(t), capture, connectors: connectorMgr, auditor,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });

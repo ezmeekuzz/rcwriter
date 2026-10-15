@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('api', {
   watchUrl: (id, url) => invoke('seo:watchUrl', id, url),
   removeWatch: (wid) => invoke('seo:removeWatch', wid),
   startTitleTests: (id) => invoke('seo:startTitleTests', id),
+  checkDecay: (id) => invoke('seo:checkDecay', id),
   planTopics: (id, count) => invoke('writer:planTopics', id, count),
   setWriterPlan: (id, plan) => invoke('writer:setPlan', id, plan),
   setWebdevConfig: (id, cfg) => invoke('webdev:setConfig', id, cfg),

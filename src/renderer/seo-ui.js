@@ -27,7 +27,7 @@ window.rankingsTab = () => {
     const tests = S.titleTests.filter((t) => t.siteId === site.id).slice(0, 10);
     return `<section class="panel" style="max-width:none">
       <div class="panel-head"><h3>${esc(site.name)}</h3><div class="btn-row">
-        ${gsc ? `<button class="btn ghost" data-action="kw-edit" data-id="${site.id}">Keywords</button><button class="btn ghost" data-action="tt-edit" data-id="${site.id}">Title tests</button>${s.keywords.length ? `<button class="btn" data-action="rank-check" data-id="${site.id}">Check now</button>` : ''}` : ''}</div></div>
+        ${gsc ? `<button class="btn ghost" data-action="kw-edit" data-id="${site.id}">Keywords</button><button class="btn ghost" data-action="tt-edit" data-id="${site.id}">Title tests</button><button class="btn ghost" data-action="cd-edit" data-id="${site.id}">Content refresh</button>${s.keywords.length ? `<button class="btn" data-action="rank-check" data-id="${site.id}">Check now</button>` : ''}` : ''}</div></div>
       ${!gsc ? '<p class="muted small">Link Search Console to this website (Websites, Google data) to track rankings, indexing and title tests.</p>' : `
       ${s.keywords.length ? `<div class="rank-scroll"><table class="data sticky"><thead><tr><th>Keyword</th><th class="num">Position</th><th class="num">7 days</th><th class="num">Clicks</th><th>Trend</th></tr></thead><tbody>${rows}</tbody></table></div>
         <p class="muted small">${s.keywords.length} keyword${s.keywords.length === 1 ? '' : 's'} · 7-day average position from Search Console, updated every morning. You're alerted when a keyword drops off page 1 or falls 5 places.</p>` : '<p class="muted small">No keywords tracked yet. Click Keywords to add them or pick from searches the site already shows up for.</p>'}
@@ -35,6 +35,7 @@ window.rankingsTab = () => {
       ${watch.length ? `<ul class="plain">${watch.map((w) => `<li><span class="chip ${w.status === 'indexed' ? 'st-applied' : w.status === 'not indexed' ? 'st-failed' : ''}">${esc(w.status)}</span> <a href="#" data-action="link" data-url="${esc(w.url)}">${esc(w.title || short(w.url))}</a> <span class="muted small">${w.coverage ? esc(w.coverage) + ' · ' : ''}added ${fmtRel(w.addedAt)}</span> <button class="btn ghost small" data-action="watch-remove" data-id="${w.id}" aria-label="Stop watching">×</button></li>`).join('')}</ul>` : '<p class="muted small">New articles published here are added automatically. If Google hasn\'t indexed one after 7 days, you get an alert and a task.</p>'}
       <div class="btn-row"><button class="btn ghost small" data-action="watch-add" data-id="${site.id}">Watch a URL</button>${watch.some((w) => w.status !== 'indexed') ? `<button class="btn ghost small" data-action="index-check" data-id="${site.id}">Check indexing now</button>` : ''}</div>
       ${s.titleTests.enabled || tests.length ? `<h4>Title tests</h4>${tests.length ? `<ul class="plain">${tests.map((t) => `<li><span class="chip">${esc(t.status)}</span> <strong>${esc(short(t.url))}</strong>: "${esc(t.oldTitle)}" → "${esc(t.newTitle)}" <span class="muted small">CTR before ${t.baseline ? t.baseline.ctr : '?'}%${t.after ? `, after ${t.after.ctr}%` : t.startedAt ? `, result ${fmtRel(new Date(new Date(t.startedAt).getTime() + 31 * 864e5).toISOString())}` : ''}</span></li>`).join('')}</ul>` : '<p class="muted small">Every Monday, pages with many impressions but a low click-through rate get a new title and description. After 28 days the better version is kept.</p>'}` : ''}
+      ${(() => { const rf = (S.contentRefreshes || []).filter((r) => r.siteId === site.id).slice(0, 10); return (s.contentDecay && s.contentDecay.enabled) || rf.length ? `<h4>Content refresh</h4>${rf.length ? `<ul class="plain">${rf.map((r) => `<li><span class="chip ${r.status === 'recovered' ? 'st-applied' : r.status === 'no change' || r.status === 'failed' ? 'st-failed' : ''}">${esc(r.status)}</span> <a href="#" data-action="link" data-url="${esc(r.url)}">${esc(short(r.url))}</a> <span class="muted small">lost ${r.lostClicks} clicks (${r.clicksDrop}%)${r.after ? ` · after refresh ${r.after.clicks} clicks` : ''} · ${fmtRel(r.startedAt)}</span></li>`).join('')}</ul>` : '<p class="muted small">Every Tuesday, pages losing search clicks over the last 28 days are refreshed (updated and expanded) so they recover. Results are checked after 30 days.</p>'}` : ''; })()}
       `}
     </section>`;
   }).join('');
@@ -103,6 +104,27 @@ function openTitleTestModal(siteId) {
         <div class="field"><label for="tt-max">Tests at a time</label><input type="number" id="tt-max" min="1" max="10" value="${esc(t.maxActive || 3)}"></div></div>
     </div>
     <footer>${t.enabled && site.type === 'wordpress' ? '<button class="btn ghost" data-action="tt-start">Find tests now</button>' : '<span></span>'}<div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="tt-save">Save</button></div></footer>
+  </div></div>`;
+}
+
+function openDecayModal(siteId) {
+  const site = S.sites.find((x) => x.id === siteId);
+  const cd = (S.seoBySite[siteId] && S.seoBySite[siteId].contentDecay) || { enabled: false, mode: 'approve', dropPct: 30, minClicks: 10, maxPerRun: 2, cooldownDays: 45 };
+  modal = { type: 'cd', siteId };
+  modalRoot.innerHTML = `<div class="backdrop"><div class="modal small" role="dialog" aria-modal="true" aria-labelledby="mt">
+    <header><h2 id="mt">Content refresh: ${esc(site.name)}</h2></header>
+    <div class="body">
+      <label class="check"><input type="checkbox" id="cd-on" ${cd.enabled ? 'checked' : ''}><span><strong>Refresh pages that are losing search traffic</strong><br><span class="muted small">Every Tuesday, RCWriter compares the last 28 days of Search Console clicks with the 28 before. Pages whose traffic has clearly dropped are refreshed through the revise engine — updating outdated facts, expanding thin sections and improving the title and intro for the searches they earn — without changing the URL. It then checks after 30 days whether traffic recovered.</span></span></label>
+      <div class="grid-2">
+        <div class="field"><label for="cd-mode">Refreshes</label><select id="cd-mode"><option value="approve" ${cd.mode !== 'auto' ? 'selected' : ''}>Wait for my approval</option><option value="auto" ${cd.mode === 'auto' ? 'selected' : ''}>Apply automatically</option></select></div>
+        <div class="field"><label for="cd-max">Pages per week</label><input type="number" id="cd-max" min="1" max="10" value="${esc(cd.maxPerRun || 2)}"></div>
+        <div class="field"><label for="cd-drop">Counts as decay at (clicks drop %)</label><input type="number" id="cd-drop" min="10" max="90" value="${esc(cd.dropPct || 30)}"></div>
+        <div class="field"><label for="cd-min">Ignore pages below (clicks / 28d)</label><input type="number" id="cd-min" min="1" max="1000" value="${esc(cd.minClicks || 10)}"></div>
+        <div class="field"><label for="cd-cool">Don't refresh again within (days)</label><input type="number" id="cd-cool" min="7" max="365" value="${esc(cd.cooldownDays || 45)}"></div>
+      </div>
+      <span class="hint">Refreshes run with your Assistant AI and follow the approval setting above, the same as "Revise from a brief".</span>
+    </div>
+    <footer>${cd.enabled ? '<button class="btn ghost" data-action="cd-check">Find decaying pages now</button>' : '<span></span>'}<div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="cd-save">Save</button></div></footer>
   </div></div>`;
 }
 
@@ -176,6 +198,13 @@ Object.assign(ACTIONS, {
   'tt-edit': (el) => openTitleTestModal(el.dataset.id),
   'tt-save': () => attempt(() => api.setSeoConfig(modal.siteId, { titleTests: { enabled: modalRoot.querySelector('#tt-on').checked, mode: modalRoot.querySelector('#tt-mode').value, maxActive: Number(modalRoot.querySelector('#tt-max').value) || 3 } }), 'Saved').then(() => closeModal()).catch(() => {}),
   'tt-start': async (el) => { el.disabled = true; el.textContent = 'Looking…'; try { const r = await api.startTitleTests(modal.siteId); toast(r.started ? `${r.started} test${r.started > 1 ? 's' : ''} started.` : 'No pages need a title test right now.'); } catch (e) { toast(cleanErr(e), 'error'); } el.disabled = false; el.textContent = 'Find tests now'; },
+  'cd-edit': (el) => openDecayModal(el.dataset.id),
+  'cd-save': () => {
+    const q = (id) => modalRoot.querySelector(id);
+    const cfg = { enabled: q('#cd-on').checked, mode: q('#cd-mode').value, maxPerRun: Number(q('#cd-max').value) || 2, dropPct: Number(q('#cd-drop').value) || 30, minClicks: Number(q('#cd-min').value) || 10, cooldownDays: Number(q('#cd-cool').value) || 45 };
+    return attempt(() => api.setSeoConfig(modal.siteId, { contentDecay: cfg }), 'Saved').then(() => closeModal()).catch(() => {});
+  },
+  'cd-check': async (el) => { el.disabled = true; el.textContent = 'Looking…'; try { const r = await api.checkDecay(modal.siteId); toast(r.started ? `Refreshing ${r.started} page${r.started > 1 ? 's' : ''}.` : r.found ? `${r.found} decaying page${r.found > 1 ? 's' : ''} found, but all are still in their cooldown window.` : 'No decaying pages found right now.'); } catch (e) { toast(cleanErr(e), 'error'); } el.disabled = false; el.textContent = 'Find decaying pages now'; },
   'wd-edit': (el) => openWebdevModal(el.dataset.id),
   'wd-save': () => {
     const q = (id) => modalRoot.querySelector(id);
