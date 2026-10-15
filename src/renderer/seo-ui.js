@@ -27,7 +27,7 @@ window.rankingsTab = () => {
     const tests = S.titleTests.filter((t) => t.siteId === site.id).slice(0, 10);
     return `<section class="panel" style="max-width:none">
       <div class="panel-head"><h3>${esc(site.name)}</h3><div class="btn-row">
-        ${gsc ? `<button class="btn ghost" data-action="kw-edit" data-id="${site.id}">Keywords</button><button class="btn ghost" data-action="tt-edit" data-id="${site.id}">Title tests</button><button class="btn ghost" data-action="cd-edit" data-id="${site.id}">Content refresh</button>${s.keywords.length ? `<button class="btn" data-action="rank-check" data-id="${site.id}">Check now</button>` : ''}` : ''}</div></div>
+        ${gsc ? `<button class="btn ghost" data-action="kw-edit" data-id="${site.id}">Keywords</button><button class="btn ghost" data-action="tt-edit" data-id="${site.id}">Title tests</button><button class="btn ghost" data-action="cd-edit" data-id="${site.id}">Content refresh</button>` : ''}${site.type === 'wordpress' ? `<button class="btn ghost" data-action="il-edit" data-id="${site.id}">Internal links</button>` : ''}${gsc && s.keywords.length ? `<button class="btn" data-action="rank-check" data-id="${site.id}">Check now</button>` : ''}</div></div>
       ${!gsc ? '<p class="muted small">Link Search Console to this website (Websites, Google data) to track rankings, indexing and title tests.</p>' : `
       ${s.keywords.length ? `<div class="rank-scroll"><table class="data sticky"><thead><tr><th>Keyword</th><th class="num">Position</th><th class="num">7 days</th><th class="num">Clicks</th><th>Trend</th></tr></thead><tbody>${rows}</tbody></table></div>
         <p class="muted small">${s.keywords.length} keyword${s.keywords.length === 1 ? '' : 's'} · 7-day average position from Search Console, updated every morning. You're alerted when a keyword drops off page 1 or falls 5 places.</p>` : '<p class="muted small">No keywords tracked yet. Click Keywords to add them or pick from searches the site already shows up for.</p>'}
@@ -37,10 +37,18 @@ window.rankingsTab = () => {
       ${s.titleTests.enabled || tests.length ? `<h4>Title tests</h4>${tests.length ? `<ul class="plain">${tests.map((t) => `<li><span class="chip">${esc(t.status)}</span> <strong>${esc(short(t.url))}</strong>: "${esc(t.oldTitle)}" → "${esc(t.newTitle)}" <span class="muted small">CTR before ${t.baseline ? t.baseline.ctr : '?'}%${t.after ? `, after ${t.after.ctr}%` : t.startedAt ? `, result ${fmtRel(new Date(new Date(t.startedAt).getTime() + 31 * 864e5).toISOString())}` : ''}</span></li>`).join('')}</ul>` : '<p class="muted small">Every Monday, pages with many impressions but a low click-through rate get a new title and description. After 28 days the better version is kept.</p>'}` : ''}
       ${(() => { const rf = (S.contentRefreshes || []).filter((r) => r.siteId === site.id).slice(0, 10); return (s.contentDecay && s.contentDecay.enabled) || rf.length ? `<h4>Content refresh</h4>${rf.length ? `<ul class="plain">${rf.map((r) => `<li><span class="chip ${r.status === 'recovered' ? 'st-applied' : r.status === 'no change' || r.status === 'failed' ? 'st-failed' : ''}">${esc(r.status)}</span> <a href="#" data-action="link" data-url="${esc(r.url)}">${esc(short(r.url))}</a> <span class="muted small">lost ${r.lostClicks} clicks (${r.clicksDrop}%)${r.after ? ` · after refresh ${r.after.clicks} clicks` : ''} · ${fmtRel(r.startedAt)}</span></li>`).join('')}</ul>` : '<p class="muted small">Every Tuesday, pages losing search clicks over the last 28 days are refreshed (updated and expanded) so they recover. Results are checked after 30 days.</p>'}` : ''; })()}
       `}
+      ${(() => {
+        if (site.type !== 'wordpress') return '';
+        const il = site.internalLinks || {};
+        const runs = (S.internalLinkRuns || []).filter((r) => r.siteId === site.id).slice(0, 1);
+        const last = runs[0];
+        return (il.enabled || last) ? `<h4>Internal links</h4>${last ? `<p class="muted small">Last run ${fmtRel(last.at)}: ${last.posts} posts, ${last.orphans} with no internal links in. ${last.queued + last.applied} link${(last.queued + last.applied) === 1 ? '' : 's'} ${last.mode === 'auto' ? 'added' : 'queued for approval'}.</p>${last.pairs && last.pairs.length ? `<ul class="plain small">${last.pairs.slice(0, 6).map((p) => `<li>“${esc(p.anchor)}” in <strong>${esc(clipc(p.from, 40))}</strong> → ${esc(clipc(p.to, 40))}</li>`).join('')}</ul>` : ''}` : '<p class="muted small">Every Wednesday, RCWriter finds pages with few or no internal links pointing to them and adds a contextual link from a related post, using a phrase already in that post. Nothing else is rewritten.</p>'}` : '';
+      })()}
     </section>`;
   }).join('');
   return blocks || '<div class="list"><div class="empty"><p>Add a website first.</p></div></div>';
 };
+function clipc(s, n) { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n)}…` : s; }
 
 window.maintenanceTab = () => {
   const sites = S.sites.filter((x) => x.type !== 'webhook' && inClient(x.id));
@@ -128,6 +136,26 @@ function openDecayModal(siteId) {
   </div></div>`;
 }
 
+function openInternalLinksModal(siteId) {
+  const site = S.sites.find((x) => x.id === siteId);
+  const il = { enabled: false, mode: 'approve', maxTargets: 5, maxLinks: 10, ...(site.internalLinks || {}) };
+  modal = { type: 'il', siteId };
+  modalRoot.innerHTML = `<div class="backdrop"><div class="modal small" role="dialog" aria-modal="true" aria-labelledby="mt">
+    <header><h2 id="mt">Internal links: ${esc(site.name)}</h2></header>
+    <div class="body">
+      ${site.type !== 'wordpress' ? '<p class="warn small">Internal linking needs the site connected as WordPress.</p>' : ''}
+      <label class="check"><input type="checkbox" id="il-on" ${il.enabled ? 'checked' : ''}><span><strong>Add internal links to under-linked pages</strong><br><span class="muted small">Every Wednesday, RCWriter reads all published posts, finds the ones with few or no internal links pointing to them (orphans), and adds one contextual link to each from a related post — using a phrase that already appears in that post, so nothing is rewritten. Good internal linking spreads ranking strength and helps Google find your pages.</span></span></label>
+      <div class="grid-2">
+        <div class="field"><label for="il-mode">New links</label><select id="il-mode"><option value="approve" ${il.mode !== 'auto' ? 'selected' : ''}>Wait for my approval</option><option value="auto" ${il.mode === 'auto' ? 'selected' : ''}>Apply automatically</option></select></div>
+        <div class="field"><label for="il-max">Links per week</label><input type="number" id="il-max" min="1" max="40" value="${esc(il.maxLinks || 10)}"></div>
+        <div class="field"><label for="il-targets">Pages to help per week</label><input type="number" id="il-targets" min="1" max="20" value="${esc(il.maxTargets || 5)}"></div>
+      </div>
+      <span class="hint">Each link goes through Approvals (or applies automatically), and every one can be undone from Changes.</span>
+    </div>
+    <footer>${site.type === 'wordpress' ? '<button class="btn ghost" data-action="il-run">Find links now</button>' : '<span></span>'}<div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="il-save">Save</button></div></footer>
+  </div></div>`;
+}
+
 function openWebdevModal(siteId) {
   const site = S.sites.find((x) => x.id === siteId);
   const c = { updates: true, security: true, domain: true, speed: true, formTest: {}, ...(site.webdev || {}) };
@@ -205,6 +233,13 @@ Object.assign(ACTIONS, {
     return attempt(() => api.setSeoConfig(modal.siteId, { contentDecay: cfg }), 'Saved').then(() => closeModal()).catch(() => {});
   },
   'cd-check': async (el) => { el.disabled = true; el.textContent = 'Looking…'; try { const r = await api.checkDecay(modal.siteId); toast(r.started ? `Refreshing ${r.started} page${r.started > 1 ? 's' : ''}.` : r.found ? `${r.found} decaying page${r.found > 1 ? 's' : ''} found, but all are still in their cooldown window.` : 'No decaying pages found right now.'); } catch (e) { toast(cleanErr(e), 'error'); } el.disabled = false; el.textContent = 'Find decaying pages now'; },
+  'il-edit': (el) => openInternalLinksModal(el.dataset.id),
+  'il-save': () => {
+    const q = (id) => modalRoot.querySelector(id);
+    const cfg = { enabled: q('#il-on').checked, mode: q('#il-mode').value, maxLinks: Number(q('#il-max').value) || 10, maxTargets: Number(q('#il-targets').value) || 5 };
+    return attempt(() => api.setInternalLinks(modal.siteId, cfg), 'Saved').then(() => closeModal()).catch(() => {});
+  },
+  'il-run': async (el) => { el.disabled = true; el.textContent = 'Reading posts…'; try { const r = await api.runInternalLinks(modal.siteId); toast((r.queued + r.applied) ? `${r.queued + r.applied} link${(r.queued + r.applied) > 1 ? 's' : ''} ${r.applied ? 'added' : 'queued'} (${r.orphans} orphan pages found).` : 'No new internal-link opportunities found.'); } catch (e) { toast(cleanErr(e), 'error'); } el.disabled = false; el.textContent = 'Find links now'; },
   'wd-edit': (el) => openWebdevModal(el.dataset.id),
   'wd-save': () => {
     const q = (id) => modalRoot.querySelector(id);

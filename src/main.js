@@ -24,6 +24,7 @@ const { createReports } = require('./reports');
 const { createAutomation } = require('./automation');
 const { createDistribution } = require('./distribution');
 const { createSeo } = require('./seo');
+const { createInternalLinks } = require('./internallinks');
 const { createWebdev } = require('./webdev');
 const { capture, closeWindow } = require('./capture');
 const { createLeads } = require('./leads');
@@ -85,6 +86,7 @@ let calendar = null;
 let brain = null;
 const brainSession = crypto.randomBytes(6).toString('hex');
 let startRevisionFn = null; // set in registerIpc; used by SEO content-decay refresh
+let internalLinks = null;
 let updates = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
@@ -273,6 +275,7 @@ function publicState() {
     indexWatch: (d.indexWatch || []).slice(0, 300),
     titleTests: (d.titleTests || []).slice(0, 200),
     contentRefreshes: (d.contentRefreshes || []).slice(0, 200),
+    internalLinkRuns: (d.internalLinkRuns || []).slice(0, 50),
     webdevBySite: webdev ? Object.fromEntries(d.sites.map((x) => [x.id, webdev.status(x.id)])) : {},
     leads: (d.leads || []).slice(0, 3000),
     campaigns: d.campaigns || [],
@@ -1586,6 +1589,8 @@ function registerIpc() {
   handle('seo:removeWatch', (wid) => { store.data.indexWatch = (store.data.indexWatch || []).filter((x) => x.id !== wid); store.save(); broadcast(); });
   handle('seo:startTitleTests', async (id) => { try { return await seo.startTitleTests(siteById(id)); } finally { broadcast(); } });
   handle('seo:checkDecay', async (id) => { try { return await seo.checkDecay(siteById(id), { manual: true }); } finally { broadcast(); } });
+  handle('illinks:setConfig', (id, cfg = {}) => { const s = siteById(id); s.internalLinks = { ...(s.internalLinks || {}), ...cfg }; store.save(); broadcast(); });
+  handle('illinks:run', async (id) => { try { return await internalLinks.analyze(siteById(id), { manual: true }); } finally { broadcast(); } });
   handle('writer:planTopics', async (id, count) => {
     const w = store.data.writers.find((x) => x.id === id);
     if (!w) throw new Error('Writer not found.');
@@ -1826,6 +1831,8 @@ if (gotLock) {
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     webdev = createWebdev({ store, google, onChange: broadcast, addTask: (t) => automation.addTask(t), capture, connectors: connectorMgr, auditor,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
+    internalLinks = createInternalLinks({ store, queueAction, onChange: broadcast,
+      notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     telegram = createTelegram({ store });
     telemetry.start();
     updates = createUpdates({ store, currentVersion: app.getVersion(), onChange: broadcast });
@@ -1852,7 +1859,7 @@ if (gotLock) {
       }
     });
     setTimeout(() => { if (tampered || !brain) return; brain.consolidate().catch(() => {}); }, 60 * 1000);
-    setInterval(() => { if (tampered) return; try { seo.tick(); webdev.tick(); leads.tick(); calendar.tick(); } catch (e) { console.error(e); } }, 60000);
+    setInterval(() => { if (tampered) return; try { seo.tick(); webdev.tick(); leads.tick(); calendar.tick(); internalLinks.tick(); } catch (e) { console.error(e); } }, 60000);
     setTimeout(() => { if (tampered) return; try { seo.tick(); webdev.tick(); calendar.tick(); } catch { /* next minute */ } }, 45000);
     automation.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }

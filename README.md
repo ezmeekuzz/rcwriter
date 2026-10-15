@@ -68,6 +68,7 @@ Each writer can now do more around every article, under **Before publishing** an
 - **Indexing watch:** every article a writer publishes is checked with Search Console URL Inspection. If Google hasn't indexed it after 7 days, you get an alert and a task with the reason.
 - **Title tests:** every Monday, pages with lots of impressions but a click-through rate well below normal for their position get a new title and description (for approval or automatically). After 28 days RCWriter keeps the winner and puts the original back if the test lost.
 - **Content refresh (2.6):** every Tuesday RCWriter compares the last 28 days of Search Console clicks with the 28 before, finds pages that are losing search traffic (content decay), and refreshes the worst offenders through the revise engine — updating outdated facts, expanding thin sections and improving the title and intro for the searches they earn, without changing the URL. Runs for approval or automatically, with a per-page cooldown so nothing is refreshed repeatedly, and it checks after 30 days whether traffic recovered. Set it up per website under Rankings → Content refresh.
+- **Internal links (2.7):** every Wednesday RCWriter reads all of a WordPress site's published posts, finds the ones with few or no internal links pointing to them (orphans), and adds one contextual link to each from a related post — using a phrase that already appears in that post, so nothing is rewritten. Good internal linking spreads ranking strength and helps Google find pages. Runs for approval or automatically, and every link can be undone from Changes. Set it up under Rankings → Internal links.
 - **Topic plans:** Writers → Topic plan builds a topic map in clusters from keyword research, and the "Follow the topic plan" topic order writes it in order.
 
 **Site audits → Maintenance** (turn on per website)
@@ -252,7 +253,8 @@ src/reports.js     Word and PDF reports
 src/automation.js  Tasks, daily digest, Gmail and Business Profile automations
 src/googleuser.js  Your Google account: Gmail and Business Profile
 src/distribution.js  Social posts (Buffer, webhook) and Mailchimp newsletters
-src/seo.js         Rank tracking, indexing watch, title tests, topic plans
+src/seo.js         Rank tracking, indexing watch, title tests, content refresh, topic plans
+src/internallinks.js  Site-wide internal linking to orphan/thin pages
 src/webdev.js      Updates, security, form, domain/email and speed checks
 src/capture.js     Page screenshots for visual checks
 src/crawler.js     Lead discovery, website reading, texts and WhatsApp
