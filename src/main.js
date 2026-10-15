@@ -25,6 +25,7 @@ const { createAutomation } = require('./automation');
 const { createDistribution } = require('./distribution');
 const { createSeo } = require('./seo');
 const { createInternalLinks } = require('./internallinks');
+const { createDeployGuard } = require('./deployguard');
 const { createWebdev } = require('./webdev');
 const { capture, closeWindow } = require('./capture');
 const { createLeads } = require('./leads');
@@ -87,6 +88,7 @@ let brain = null;
 const brainSession = crypto.randomBytes(6).toString('hex');
 let startRevisionFn = null; // set in registerIpc; used by SEO content-decay refresh
 let internalLinks = null;
+let deployGuard = null;
 let updates = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
@@ -276,6 +278,7 @@ function publicState() {
     titleTests: (d.titleTests || []).slice(0, 200),
     contentRefreshes: (d.contentRefreshes || []).slice(0, 200),
     internalLinkRuns: (d.internalLinkRuns || []).slice(0, 50),
+    deployChecks: (d.deployChecks || []).slice(0, 50),
     webdevBySite: webdev ? Object.fromEntries(d.sites.map((x) => [x.id, webdev.status(x.id)])) : {},
     leads: (d.leads || []).slice(0, 3000),
     campaigns: d.campaigns || [],
@@ -1591,6 +1594,7 @@ function registerIpc() {
   handle('seo:checkDecay', async (id) => { try { return await seo.checkDecay(siteById(id), { manual: true }); } finally { broadcast(); } });
   handle('illinks:setConfig', (id, cfg = {}) => { const s = siteById(id); s.internalLinks = { ...(s.internalLinks || {}), ...cfg }; store.save(); broadcast(); });
   handle('illinks:run', async (id) => { try { return await internalLinks.analyze(siteById(id), { manual: true }); } finally { broadcast(); } });
+  handle('guard:setConfig', (id, cfg = {}) => { const s = siteById(id); s.deployGuard = { ...(s.deployGuard || {}), ...cfg }; store.save(); broadcast(); });
   handle('writer:planTopics', async (id, count) => {
     const w = store.data.writers.find((x) => x.id === id);
     if (!w) throw new Error('Writer not found.');
@@ -1800,13 +1804,21 @@ if (gotLock) {
       store, connectors: connectorMgr, builtins, providers, codex, codexCmd, codexProblem, onChange: broadcast,
       siteMemory: (siteId) => { const s = store.data.sites.find((x) => x.id === siteId); return s ? sites.memoryText(s) : ''; },
       memory: { instruction: brain.SYSTEM_INSTRUCTION, recall: (job) => brain.recall({ task: `${job.name || ''} ${job.instructions || ''}`.slice(0, 600) }).text },
-      afterRun: (job, rec, text) => { logAuditToBrain(job, rec, text); return automation.afterAudit(job, rec, text); },
+      afterRun: async (job, rec, text) => {
+        logAuditToBrain(job, rec, text);
+        await automation.afterAudit(job, rec, text);
+        if (!String(job.id || '').startsWith('revert-')) {
+          try { const s = store.data.sites.find((x) => x.id === job.siteId); if (s && deployGuard) await deployGuard.verifyRun(s, rec); } catch (e) { store.log('info', `Safe-deploy guard: ${e.message}`); }
+        }
+      },
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined),
       paths: {
         execPath: () => process.execPath,
         gateway: () => path.join(__dirname, 'gateway.js').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`)
       }
     });
+    deployGuard = createDeployGuard({ store, capture, revert: (id) => auditor.revert(id), onChange: broadcast, userDataDir: app.getPath('userData'),
+      addTask: (t) => automation.addTask(t), notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     pipeline = createPipeline({ store, providers, builtins, auditor, providerConfig, postsFor });
     monitor = createMonitor({
       store, google, guard: hostGuard, onChange: broadcast, blocked: () => tampered,

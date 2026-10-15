@@ -77,6 +77,7 @@ Each writer can now do more around every article, under **Before publishing** an
 - **Contact form test:** a weekly test through a Contact Form 7 form, with an alert if the email fails to send.
 - **Domain and email:** domain expiry (RDAP) and SPF, DKIM and DMARC records.
 - **Speed trends:** weekly PageSpeed scores for the homepage and top pages, with an alert when they get slower.
+- **Safe-deploy guard (2.8):** after an audit, auto-fix or revision applies changes to a site, RCWriter loads the homepage and your key pages in a headless browser and checks they still work — correct HTTP status, no PHP fatal or database error, no white screen — and compares each to the last known-good screenshot for big visual changes. If a page is broken it rolls that run's changes back automatically (using each change's built-in undo) and re-checks, or in warn-only mode just alerts you and files a high-priority task. This lets you give audits more autonomy without fear of a change taking the site down. Turn it on per website under Maintenance → Safe-deploy guard.
 
 **New audit starting points:** 404 to redirect fixer (adds 301s with the Redirection plugin), local SEO check (name, address and phone consistency) and accessibility (WCAG) audit, with new tools `wp_add_redirect`, `wp_list_redirects` and `accessibility_check`.
 
@@ -255,6 +256,7 @@ src/googleuser.js  Your Google account: Gmail and Business Profile
 src/distribution.js  Social posts (Buffer, webhook) and Mailchimp newsletters
 src/seo.js         Rank tracking, indexing watch, title tests, content refresh, topic plans
 src/internallinks.js  Site-wide internal linking to orphan/thin pages
+src/deployguard.js  Checks pages after AI changes and auto-rolls-back breakage
 src/webdev.js      Updates, security, form, domain/email and speed checks
 src/capture.js     Page screenshots for visual checks
 src/crawler.js     Lead discovery, website reading, texts and WhatsApp

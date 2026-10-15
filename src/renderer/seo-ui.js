@@ -76,6 +76,8 @@ window.maintenanceTab = () => {
           <button class="btn small" data-action="wd-check" data-what="domain" data-id="${site.id}">Check</button></div>
         <div><h4>Speed</h4>${Object.values(last).length ? Object.values(last).map((r) => `<p class="small">${esc(short(r.url))}: score <strong>${r.score ?? '?'}</strong>, LCP ${r.lcp ?? '?'} s</p>`).join('') : '<p class="muted small">Weekly PageSpeed scores for the homepage and top pages, with an alert when they get slower.</p>'}
           <button class="btn small" data-action="wd-check" data-what="speed" data-id="${site.id}">Check</button></div>
+        ${(() => { const g = site.deployGuard || {}; const chk = (S.deployChecks || []).filter((x) => x.siteId === site.id)[0]; return `<div><h4>Safe-deploy guard</h4>${g.enabled ? `<p class="small">On — ${g.mode === 'warn' ? 'warn only' : 'auto-rollback'}.</p>${chk ? `<p class="small ${chk.verdict.startsWith('reverted') || chk.verdict === 'broken' ? 'err' : ''}">Last check ${fmtRel(chk.at)}: ${esc(chk.verdict)}${chk.reverted ? ` (${chk.reverted} rolled back)` : ''}.</p>` : '<p class="muted small">Checks key pages after each AI change.</p>'}` : '<p class="muted small">After an AI change, loads your key pages and rolls the change back if one breaks (HTTP error, PHP fatal, white screen).</p>'}
+          <button class="btn small" data-action="guard-edit" data-id="${site.id}">${g.enabled ? 'Settings' : 'Turn on'}</button></div>`; })()}
         ${site.type === 'wordpress' ? `<div><h4>Contact form test</h4>${w.formTest ? `<p class="small">${w.formTest.ok ? '✓ Last test sent' : `<span class="err">${esc(w.formTest.status)}</span>`} ${fmtRel(w.formTest.at)}</p>` : `<p class="muted small">${c.formTest && c.formTest.enabled ? 'Weekly test on.' : 'Sends a weekly test through a Contact Form 7 form and alerts you if it fails.'}</p>`}
           ${c.formTest && c.formTest.formId ? `<button class="btn small" data-action="wd-check" data-what="form" data-id="${site.id}">Test now</button>` : ''}</div>` : ''}
       </div>
@@ -181,6 +183,23 @@ function openWebdevModal(siteId) {
   </div></div>`;
 }
 
+function openGuardModal(siteId) {
+  const site = S.sites.find((x) => x.id === siteId);
+  const g = { enabled: false, mode: 'auto', ...(site.deployGuard || {}) };
+  modal = { type: 'guard', siteId };
+  modalRoot.innerHTML = `<div class="backdrop"><div class="modal small" role="dialog" aria-modal="true" aria-labelledby="mt">
+    <header><h2 id="mt">Safe-deploy guard: ${esc(site.name)}</h2></header>
+    <div class="body">
+      <label class="check"><input type="checkbox" id="g-on" ${g.enabled ? 'checked' : ''}><span><strong>Check the site after every AI change</strong><br><span class="muted small">After an audit, auto-fix or revision applies changes to this site, RCWriter loads the homepage and your key pages (set under Maintenance settings) in a headless browser and checks they still work — correct HTTP status, no PHP fatal or database error, no white screen. It also compares each page to the last known-good screenshot and flags a big visual change.</span></span></label>
+      <div class="field" style="max-width:320px"><label for="g-mode">When a page is broken</label><select id="g-mode">
+        <option value="auto" ${g.mode !== 'warn' ? 'selected' : ''}>Roll the change back automatically</option>
+        <option value="warn" ${g.mode === 'warn' ? 'selected' : ''}>Just alert me and add a task</option></select>
+        <span class="hint">Auto-rollback uses each change's built-in undo, then re-checks the page. With it on, you can safely give audits more autonomy.</span></div>
+    </div>
+    <footer><span></span><div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="guard-save">Save</button></div></footer>
+  </div></div>`;
+}
+
 function openPlanModal(writerId) {
   const w = S.writers.find((x) => x.id === writerId);
   const plan = w.plan || [];
@@ -240,6 +259,8 @@ Object.assign(ACTIONS, {
     return attempt(() => api.setInternalLinks(modal.siteId, cfg), 'Saved').then(() => closeModal()).catch(() => {});
   },
   'il-run': async (el) => { el.disabled = true; el.textContent = 'Reading posts…'; try { const r = await api.runInternalLinks(modal.siteId); toast((r.queued + r.applied) ? `${r.queued + r.applied} link${(r.queued + r.applied) > 1 ? 's' : ''} ${r.applied ? 'added' : 'queued'} (${r.orphans} orphan pages found).` : 'No new internal-link opportunities found.'); } catch (e) { toast(cleanErr(e), 'error'); } el.disabled = false; el.textContent = 'Find links now'; },
+  'guard-edit': (el) => openGuardModal(el.dataset.id),
+  'guard-save': () => attempt(() => api.setDeployGuard(modal.siteId, { enabled: modalRoot.querySelector('#g-on').checked, mode: modalRoot.querySelector('#g-mode').value }), 'Saved').then(() => closeModal()).catch(() => {}),
   'wd-edit': (el) => openWebdevModal(el.dataset.id),
   'wd-save': () => {
     const q = (id) => modalRoot.querySelector(id);

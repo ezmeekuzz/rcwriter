@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('api', {
   checkDecay: (id) => invoke('seo:checkDecay', id),
   setInternalLinks: (id, cfg) => invoke('illinks:setConfig', id, cfg),
   runInternalLinks: (id) => invoke('illinks:run', id),
+  setDeployGuard: (id, cfg) => invoke('guard:setConfig', id, cfg),
   planTopics: (id, count) => invoke('writer:planTopics', id, count),
   setWriterPlan: (id, plan) => invoke('writer:setPlan', id, plan),
   setWebdevConfig: (id, cfg) => invoke('webdev:setConfig', id, cfg),
