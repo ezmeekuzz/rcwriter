@@ -69,6 +69,7 @@ Each writer can now do more around every article, under **Before publishing** an
 - **Title tests:** every Monday, pages with lots of impressions but a click-through rate well below normal for their position get a new title and description (for approval or automatically). After 28 days RCWriter keeps the winner and puts the original back if the test lost.
 - **Content refresh (2.6):** every Tuesday RCWriter compares the last 28 days of Search Console clicks with the 28 before, finds pages that are losing search traffic (content decay), and refreshes the worst offenders through the revise engine — updating outdated facts, expanding thin sections and improving the title and intro for the searches they earn, without changing the URL. Runs for approval or automatically, with a per-page cooldown so nothing is refreshed repeatedly, and it checks after 30 days whether traffic recovered. Set it up per website under Rankings → Content refresh.
 - **Internal links (2.7):** every Wednesday RCWriter reads all of a WordPress site's published posts, finds the ones with few or no internal links pointing to them (orphans), and adds one contextual link to each from a related post — using a phrase that already appears in that post, so nothing is rewritten. Good internal linking spreads ranking strength and helps Google find pages. Runs for approval or automatically, and every link can be undone from Changes. Set it up under Rankings → Internal links.
+- **Competitor radar (2.9):** every Thursday RCWriter uses your Ahrefs or Semrush connection to check your own backlink profile and a list of competitor domains, compares it with the previous week, and alerts you to lost backlinks, competitors' new content and keywords they now outrank you for — filing tasks for the ones worth acting on. The first run records a baseline; later runs report what changed. Set competitors under Rankings → Competitors.
 - **Topic plans:** Writers → Topic plan builds a topic map in clusters from keyword research, and the "Follow the topic plan" topic order writes it in order.
 
 **Site audits → Maintenance** (turn on per website)
@@ -257,6 +258,7 @@ src/distribution.js  Social posts (Buffer, webhook) and Mailchimp newsletters
 src/seo.js         Rank tracking, indexing watch, title tests, content refresh, topic plans
 src/internallinks.js  Site-wide internal linking to orphan/thin pages
 src/deployguard.js  Checks pages after AI changes and auto-rolls-back breakage
+src/radar.js       Weekly competitor and backlink radar (Ahrefs/Semrush)
 src/webdev.js      Updates, security, form, domain/email and speed checks
 src/capture.js     Page screenshots for visual checks
 src/crawler.js     Lead discovery, website reading, texts and WhatsApp

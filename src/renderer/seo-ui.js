@@ -27,7 +27,7 @@ window.rankingsTab = () => {
     const tests = S.titleTests.filter((t) => t.siteId === site.id).slice(0, 10);
     return `<section class="panel" style="max-width:none">
       <div class="panel-head"><h3>${esc(site.name)}</h3><div class="btn-row">
-        ${gsc ? `<button class="btn ghost" data-action="kw-edit" data-id="${site.id}">Keywords</button><button class="btn ghost" data-action="tt-edit" data-id="${site.id}">Title tests</button><button class="btn ghost" data-action="cd-edit" data-id="${site.id}">Content refresh</button>` : ''}${site.type === 'wordpress' ? `<button class="btn ghost" data-action="il-edit" data-id="${site.id}">Internal links</button>` : ''}${gsc && s.keywords.length ? `<button class="btn" data-action="rank-check" data-id="${site.id}">Check now</button>` : ''}</div></div>
+        ${gsc ? `<button class="btn ghost" data-action="kw-edit" data-id="${site.id}">Keywords</button><button class="btn ghost" data-action="tt-edit" data-id="${site.id}">Title tests</button><button class="btn ghost" data-action="cd-edit" data-id="${site.id}">Content refresh</button>` : ''}${site.type === 'wordpress' ? `<button class="btn ghost" data-action="il-edit" data-id="${site.id}">Internal links</button>` : ''}<button class="btn ghost" data-action="radar-edit" data-id="${site.id}">Competitors</button>${gsc && s.keywords.length ? `<button class="btn" data-action="rank-check" data-id="${site.id}">Check now</button>` : ''}</div></div>
       ${!gsc ? '<p class="muted small">Link Search Console to this website (Websites, Google data) to track rankings, indexing and title tests.</p>' : `
       ${s.keywords.length ? `<div class="rank-scroll"><table class="data sticky"><thead><tr><th>Keyword</th><th class="num">Position</th><th class="num">7 days</th><th class="num">Clicks</th><th>Trend</th></tr></thead><tbody>${rows}</tbody></table></div>
         <p class="muted small">${s.keywords.length} keyword${s.keywords.length === 1 ? '' : 's'} · 7-day average position from Search Console, updated every morning. You're alerted when a keyword drops off page 1 or falls 5 places.</p>` : '<p class="muted small">No keywords tracked yet. Click Keywords to add them or pick from searches the site already shows up for.</p>'}
@@ -43,6 +43,12 @@ window.rankingsTab = () => {
         const runs = (S.internalLinkRuns || []).filter((r) => r.siteId === site.id).slice(0, 1);
         const last = runs[0];
         return (il.enabled || last) ? `<h4>Internal links</h4>${last ? `<p class="muted small">Last run ${fmtRel(last.at)}: ${last.posts} posts, ${last.orphans} with no internal links in. ${last.queued + last.applied} link${(last.queued + last.applied) === 1 ? '' : 's'} ${last.mode === 'auto' ? 'added' : 'queued for approval'}.</p>${last.pairs && last.pairs.length ? `<ul class="plain small">${last.pairs.slice(0, 6).map((p) => `<li>“${esc(p.anchor)}” in <strong>${esc(clipc(p.from, 40))}</strong> → ${esc(clipc(p.to, 40))}</li>`).join('')}</ul>` : ''}` : '<p class="muted small">Every Wednesday, RCWriter finds pages with few or no internal links pointing to them and adds a contextual link from a related post, using a phrase already in that post. Nothing else is rewritten.</p>'}` : '';
+      })()}
+      ${(() => {
+        const r = site.radar || {};
+        const last = (S.radarRuns || []).filter((x) => x.siteId === site.id)[0];
+        if (!r.enabled && !last) return '';
+        return `<h4>Competitor radar</h4>${last ? `<p class="muted small">Last run ${fmtRel(last.at)}${last.baseline ? ' (baseline recorded)' : `: ${last.newLost.length} lost backlink${last.newLost.length === 1 ? '' : 's'}, ${last.newContent.length} new competitor page${last.newContent.length === 1 ? '' : 's'}${last.refDelta !== null && last.refDelta !== undefined ? `, referring domains ${last.refDelta > 0 ? '+' : ''}${last.refDelta}` : ''}`}.</p>${!last.baseline && last.newContent && last.newContent.length ? `<ul class="plain small">${last.newContent.slice(0, 5).map((ct) => `<li><a href="#" data-action="link" data-url="${esc(ct.url)}">${esc(clipc(ct.title, 60))}</a> <span class="muted">${esc(ct.competitor)}</span></li>`).join('')}</ul>` : ''}${last.losingKeywords && last.losingKeywords.length ? `<p class="small">Competitors outrank you for: ${last.losingKeywords.slice(0, 6).map((k) => `${esc(k.keyword)}${k.competitor ? ` (${esc(k.competitor)})` : ''}`).join(', ')}.</p>` : ''}` : `<p class="muted small">Tracks ${(r.competitors || []).length ? (r.competitors || []).map(esc).join(', ') : 'competitor domains'} with Ahrefs/Semrush each Thursday and alerts you to lost backlinks and competitors' new content.</p>`}`;
       })()}
     </section>`;
   }).join('');
@@ -183,6 +189,22 @@ function openWebdevModal(siteId) {
   </div></div>`;
 }
 
+function openRadarModal(siteId) {
+  const site = S.sites.find((x) => x.id === siteId);
+  const r = { enabled: false, competitors: [], ...(site.radar || {}) };
+  const hasSeo = (S.connectors || []).some((c) => ['ahrefs', 'semrush'].includes(c.preset) && c.signedIn);
+  modal = { type: 'radar', siteId };
+  modalRoot.innerHTML = `<div class="backdrop"><div class="modal small" role="dialog" aria-modal="true" aria-labelledby="mt">
+    <header><h2 id="mt">Competitor radar: ${esc(site.name)}</h2></header>
+    <div class="body">
+      ${hasSeo ? '' : '<p class="warn small">Connect Ahrefs or Semrush (AI providers → Connectors) to give the radar data to read.</p>'}
+      <label class="check"><input type="checkbox" id="r-on" ${r.enabled ? 'checked' : ''}><span><strong>Watch competitors and backlinks weekly</strong><br><span class="muted small">Every Thursday RCWriter uses your Ahrefs/Semrush connection to check your backlinks and the competitors below, then alerts you to lost backlinks and competitors' new content, and files tasks for the ones worth acting on. The first run just records a baseline.</span></span></label>
+      <div class="field"><label for="r-comp">Competitor domains (one per line, up to 5)</label><textarea id="r-comp" placeholder="competitor1.com&#10;competitor2.com">${esc((r.competitors || []).join('\n'))}</textarea></div>
+    </div>
+    <footer>${hasSeo ? '<button class="btn ghost" data-action="radar-run">Run now</button>' : '<span></span>'}<div class="btn-row"><button class="btn ghost" data-action="close-modal">Cancel</button><button class="btn primary" data-action="radar-save">Save</button></div></footer>
+  </div></div>`;
+}
+
 function openGuardModal(siteId) {
   const site = S.sites.find((x) => x.id === siteId);
   const g = { enabled: false, mode: 'auto', ...(site.deployGuard || {}) };
@@ -259,6 +281,9 @@ Object.assign(ACTIONS, {
     return attempt(() => api.setInternalLinks(modal.siteId, cfg), 'Saved').then(() => closeModal()).catch(() => {});
   },
   'il-run': async (el) => { el.disabled = true; el.textContent = 'Reading posts…'; try { const r = await api.runInternalLinks(modal.siteId); toast((r.queued + r.applied) ? `${r.queued + r.applied} link${(r.queued + r.applied) > 1 ? 's' : ''} ${r.applied ? 'added' : 'queued'} (${r.orphans} orphan pages found).` : 'No new internal-link opportunities found.'); } catch (e) { toast(cleanErr(e), 'error'); } el.disabled = false; el.textContent = 'Find links now'; },
+  'radar-edit': (el) => openRadarModal(el.dataset.id),
+  'radar-save': () => attempt(() => api.setRadar(modal.siteId, { enabled: modalRoot.querySelector('#r-on').checked, competitors: modalRoot.querySelector('#r-comp').value }), 'Saved').then(() => closeModal()).catch(() => {}),
+  'radar-run': async (el) => { el.disabled = true; el.textContent = 'Checking…'; try { const r = await api.runRadar(modal.siteId); toast(r.baseline ? 'Baseline recorded. Future runs will report what changed.' : `Done: ${r.newLost} lost backlink${r.newLost === 1 ? '' : 's'}, ${r.newContent} new competitor page${r.newContent === 1 ? '' : 's'}.`); } catch (e) { toast(cleanErr(e), 'error'); } el.disabled = false; el.textContent = 'Run now'; },
   'guard-edit': (el) => openGuardModal(el.dataset.id),
   'guard-save': () => attempt(() => api.setDeployGuard(modal.siteId, { enabled: modalRoot.querySelector('#g-on').checked, mode: modalRoot.querySelector('#g-mode').value }), 'Saved').then(() => closeModal()).catch(() => {}),
   'wd-edit': (el) => openWebdevModal(el.dataset.id),

@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('api', {
   setInternalLinks: (id, cfg) => invoke('illinks:setConfig', id, cfg),
   runInternalLinks: (id) => invoke('illinks:run', id),
   setDeployGuard: (id, cfg) => invoke('guard:setConfig', id, cfg),
+  setRadar: (id, cfg) => invoke('radar:setConfig', id, cfg),
+  runRadar: (id) => invoke('radar:run', id),
   planTopics: (id, count) => invoke('writer:planTopics', id, count),
   setWriterPlan: (id, plan) => invoke('writer:setPlan', id, plan),
   setWebdevConfig: (id, cfg) => invoke('webdev:setConfig', id, cfg),

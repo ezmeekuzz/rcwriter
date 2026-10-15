@@ -26,6 +26,7 @@ const { createDistribution } = require('./distribution');
 const { createSeo } = require('./seo');
 const { createInternalLinks } = require('./internallinks');
 const { createDeployGuard } = require('./deployguard');
+const { createRadar } = require('./radar');
 const { createWebdev } = require('./webdev');
 const { capture, closeWindow } = require('./capture');
 const { createLeads } = require('./leads');
@@ -89,6 +90,7 @@ const brainSession = crypto.randomBytes(6).toString('hex');
 let startRevisionFn = null; // set in registerIpc; used by SEO content-decay refresh
 let internalLinks = null;
 let deployGuard = null;
+let radar = null;
 let updates = null;
 const siteCache = new Map(); // siteId -> { at, posts }
 let toldAboutTray = false;
@@ -279,6 +281,7 @@ function publicState() {
     contentRefreshes: (d.contentRefreshes || []).slice(0, 200),
     internalLinkRuns: (d.internalLinkRuns || []).slice(0, 50),
     deployChecks: (d.deployChecks || []).slice(0, 50),
+    radarRuns: (d.radarRuns || []).slice(0, 50),
     webdevBySite: webdev ? Object.fromEntries(d.sites.map((x) => [x.id, webdev.status(x.id)])) : {},
     leads: (d.leads || []).slice(0, 3000),
     campaigns: d.campaigns || [],
@@ -1595,6 +1598,13 @@ function registerIpc() {
   handle('illinks:setConfig', (id, cfg = {}) => { const s = siteById(id); s.internalLinks = { ...(s.internalLinks || {}), ...cfg }; store.save(); broadcast(); });
   handle('illinks:run', async (id) => { try { return await internalLinks.analyze(siteById(id), { manual: true }); } finally { broadcast(); } });
   handle('guard:setConfig', (id, cfg = {}) => { const s = siteById(id); s.deployGuard = { ...(s.deployGuard || {}), ...cfg }; store.save(); broadcast(); });
+  handle('radar:setConfig', (id, cfg = {}) => {
+    const s = siteById(id);
+    const next = { ...(s.radar || {}), ...cfg };
+    if ('competitors' in cfg) next.competitors = [...new Set(String(Array.isArray(cfg.competitors) ? cfg.competitors.join('\n') : cfg.competitors || '').split(/\n|,/).map((x) => x.trim()).filter(Boolean))].slice(0, 5);
+    s.radar = next; store.save(); broadcast();
+  });
+  handle('radar:run', async (id) => { try { return await radar.run(siteById(id), { manual: true }); } finally { broadcast(); } });
   handle('writer:planTopics', async (id, count) => {
     const w = store.data.writers.find((x) => x.id === id);
     if (!w) throw new Error('Writer not found.');
@@ -1845,6 +1855,8 @@ if (gotLock) {
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     internalLinks = createInternalLinks({ store, queueAction, onChange: broadcast,
       notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
+    radar = createRadar({ store, research: (o) => auditor.research(o), assistantChoice, onChange: broadcast, addTask: (t) => automation.addTask(t),
+      notify: (title, body, target) => notify(title, body, target ? () => win?.webContents.send('navigate-to', target) : undefined) });
     telegram = createTelegram({ store });
     telemetry.start();
     updates = createUpdates({ store, currentVersion: app.getVersion(), onChange: broadcast });
@@ -1871,7 +1883,7 @@ if (gotLock) {
       }
     });
     setTimeout(() => { if (tampered || !brain) return; brain.consolidate().catch(() => {}); }, 60 * 1000);
-    setInterval(() => { if (tampered) return; try { seo.tick(); webdev.tick(); leads.tick(); calendar.tick(); internalLinks.tick(); } catch (e) { console.error(e); } }, 60000);
+    setInterval(() => { if (tampered) return; try { seo.tick(); webdev.tick(); leads.tick(); calendar.tick(); internalLinks.tick(); radar.tick(); } catch (e) { console.error(e); } }, 60000);
     setTimeout(() => { if (tampered) return; try { seo.tick(); webdev.tick(); calendar.tick(); } catch { /* next minute */ } }, 45000);
     automation.start();
     if (pendingDeepLink) { handleDeepLink(pendingDeepLink); pendingDeepLink = null; }
