@@ -69,7 +69,7 @@ function viewLeads() {
   const u = info.usage || {};
   const board = Object.keys(STAGE_LABEL).map((st) => {
     const items = list.filter((l) => l.stage === st);
-    return `<div class="lead-col"><h4>${STAGE_LABEL[st]} <span class="muted">${items.length}</span></h4>${items.slice(0, 50).map(leadCard).join('') || '<p class="muted small">None</p>'}${items.length > 50 ? `<p class="muted small">and ${items.length - 50} more (use the table)</p>` : ''}</div>`;
+    return `<div class="lead-col${items.length ? '' : ' empty'}"><h4>${STAGE_LABEL[st]} <span class="muted">${items.length}</span></h4>${items.slice(0, 50).map(leadCard).join('') || '<p class="muted small">None</p>'}${items.length > 50 ? `<p class="muted small">and ${items.length - 50} more (use the table)</p>` : ''}</div>`;
   }).join('');
   return `
     <div class="page-head"><div><h1>Leads</h1><p class="sub">Everything your crawlers found and everything you added: business, contact person, emails, phones, website, address and what the AI read on their site. Today: ${u.email || 0}/${info.dailyLimit || 20} emails, ${u.sms || 0}/${info.smsDailyLimit || 10} texts, ${u.whatsapp || 0}/${info.waDailyLimit || 10} WhatsApp.</p></div>

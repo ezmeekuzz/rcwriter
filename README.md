@@ -92,7 +92,7 @@ Each writer can now do more around every article, under **Before publishing** an
 
 For each business, the crawler reads the website politely (home, contact, about and team pages, one request at a time) and collects every email (including obfuscated and Cloudflare-protected ones), phone number and social profile. Your AI provider then picks out the **contact person and their role**, other staff, a description, services, opening hours and notes for the pitch. It also notes website problems worth pitching (speed, missing titles, outdated footer…) and scores the lead. Businesses already found or contacted are never collected twice.
 
-**Leads → Leads.** Everything is saved in RCWriter: a searchable **table** (business, contact person, emails, phones, website, address, score, stage) and a **pipeline** board, a detail view with every scraped field, and **CSV export**.
+**Leads → Leads.** Everything is saved in RCWriter: a searchable **table** (business, contact person, emails, phones, website, address, score, stage) and a **pipeline** board, a detail view with every scraped field, and **CSV export**. The pipeline board stays a fixed height — each stage column scrolls on its own with its heading kept in view, empty stages collapse to a slim strip, and the table keeps its header pinned while you scroll (2.9.1), so long lists no longer stretch the page.
 
 **Outreach, per crawler:**
 - **Email** through your Gmail: a personal first email built on what was found, then follow-ups on the days you choose, in the same thread, stopping when they reply (replies become high-priority tasks; "no thanks" stops everything). Approve each one, or send automatically.

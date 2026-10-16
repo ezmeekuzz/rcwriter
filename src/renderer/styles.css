@@ -395,17 +395,24 @@ ul.plan li.done span:first-child { text-decoration: line-through; color: var(--i
 /* 2.0: leads, assistant, playbooks */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; }
 .toolbar select { width: auto; }
-.lead-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
-.lead-col { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 10px; min-height: 120px; }
-.lead-col h4 { margin: 2px 4px 10px; font-size: 13px; }
-.lead-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px; margin-bottom: 8px; font-size: 13px; }
+/* Pipeline board: a self-contained scroll area so the page itself doesn't grow.
+   Each column scrolls vertically on its own and keeps its stage header in view;
+   empty stages collapse to a slim strip so the board stays narrow. */
+.lead-board { display: flex; gap: 12px; overflow-x: auto; overflow-y: hidden; height: calc(100vh - 250px); min-height: 300px; padding-bottom: 6px; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+.lead-col { flex: 0 0 248px; display: flex; flex-direction: column; max-height: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-m); overflow-y: auto; overflow-x: hidden; scroll-snap-align: start; padding: 0 10px 10px; }
+.lead-col.empty { flex-basis: 150px; }
+.lead-col.empty .muted.small { opacity: .7; }
+.lead-col h4 { position: sticky; top: 0; z-index: 2; margin: 0 -10px 8px; padding: 10px 12px 8px; font-size: 13px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.lead-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 9px 10px; margin-bottom: 8px; font-size: 12.5px; }
+.lead-card .meta { margin: 1px 0; }
 .lead-card .lc-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .lead-card .lc-head a { color: inherit; text-decoration: none; }
 .lead-card .lc-actions { margin-top: 8px; flex-wrap: wrap; gap: 6px; }
 .lead-card select.small { width: auto; font-size: 12px; padding: 2px 6px; }
 .pending-email { margin: 8px 0; padding: 8px; border-left: 3px solid var(--marigold); background: var(--marigold-wash); border-radius: 4px; }
 .pending-email pre, .row pre { white-space: pre-wrap; font: 12.5px/1.45 var(--ui); margin: 6px 0; }
-.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); }
+.table-wrap { overflow: auto; max-height: calc(100vh - 230px); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); }
+.table-wrap table.data thead th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); }
 table.leads-table td { vertical-align: top; }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: var(--surface-2); }
@@ -445,3 +452,13 @@ body.gated .sidebar .owner-mark { display: none; }
 .mem-imp { color: var(--marigold-text); font-size: 12px; letter-spacing: 1px; }
 .mem-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
 .chip.small { font-size: 11px; padding: 1px 7px; }
+
+/* Comfortable, themed scrollbars for every scroll region (horizontal bar on the
+   pipeline board is now clearly grabbable). Chromium / Electron. */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 25%, transparent) transparent; }
+*::-webkit-scrollbar { width: 11px; height: 11px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ink) 22%, transparent); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--ink) 42%, transparent); background-clip: content-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+.lead-board::-webkit-scrollbar { height: 13px; }
