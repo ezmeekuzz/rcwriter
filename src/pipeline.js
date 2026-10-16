@@ -62,6 +62,21 @@ function createPipeline({ store, providers, builtins, auditor, providerConfig, p
     return { topic, keyword: kw };
   }
 
+  // When no keyword research ran, derive the single best focus keyphrase from the
+  // finished article so SEO fields (focus keyphrase, slug, meta) can still be set.
+  async function deriveKeyphrase(writer, article) {
+    const ai = aiFor(writer);
+    const body = readBody(article);
+    const r = await ai({
+      system: 'You are an SEO editor. You answer only with JSON.',
+      prompt: `Read this article and give the single best SEO focus keyphrase for it (the exact phrase a reader would search), 2 to 5 words, plus up to 3 closely related secondary keyphrases. Use wording that actually appears in the article.\n\nTitle: ${article.title}\n\n${enhance.plain(body).slice(0, 1800)}\n\nReturn only JSON: {"keyword": "...", "secondary": ["...", "..."]}`,
+      maxTokens: 200
+    });
+    const j = enhance.parseJson(r.text) || {};
+    if (!j.keyword) return null;
+    return { keyword: String(j.keyword).trim(), secondary: (j.secondary || []).map(String).slice(0, 4), volume: null, difficulty: null, why: 'Derived from the finished article.', derived: true };
+  }
+
   // ---------- after writing ----------
   async function afterWrite(writer, article, log) {
     const ai = aiFor(writer);
@@ -195,7 +210,7 @@ function createPipeline({ store, providers, builtins, auditor, providerConfig, p
     return out;
   }
 
-  return { researchTopic, afterWrite, schemaFor, imageFor, linkFromOlderPosts };
+  return { researchTopic, deriveKeyphrase, afterWrite, schemaFor, imageFor, linkFromOlderPosts };
 }
 
 module.exports = { createPipeline };

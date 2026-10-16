@@ -112,6 +112,14 @@ Also: **proposals** as Word/PDF from a lead's findings and your services and pri
 
 **Writers use site data:** with a WordPress site selected, a writer reads the site's published posts so it doesn't repeat them and links to related ones. With Search Console linked, it aims articles at searches the site already appears for but isn't in the top 3 for yet.
 
+## SEO-optimised articles (2.10)
+
+Every article a writer produces — whether it researched a keyword or not — now targets a focus keyphrase and is published with proper on-page SEO, so it scores well in Rank Math / Yoast instead of landing at the bottom:
+
+- **Keyphrase first.** Writers set to "research" topic mode find a real keyword (search volume, low difficulty) with Ahrefs/Semrush/Search Console as before. Every other writer now gets a focus keyphrase derived from the finished article, so nothing publishes without one.
+- **Best-practice writing.** The writer is instructed to put the keyphrase in the title (near the start, under ~60 characters), the first 100 words and at least one H2; keep paragraphs short with descriptive subheadings and lists; link to an authoritative external source and relevant internal pages; cover related searches; add a short FAQ; and finish with a 140–155 character meta description containing the keyphrase.
+- **Published with the SEO fields set.** On WordPress, RCWriter now writes a clean keyphrase-led **slug**, the **focus keyphrase** and **meta description** for whichever SEO plugin is installed (Rank Math or Yoast), and puts the keyphrase in the featured image's **alt text**. It then checks the keyphrase saved; if your SEO plugin blocks that over the API, it tells you the exact keyphrase to paste in. Headless (webhook) sites receive the slug, meta description and keyphrases in the payload.
+
 ## AI memory (2.5)
 
 **Workspace → AI memory.** RCWriter keeps a persistent memory of what its AI did, decided and suggested across sessions, so it stays consistent and learns from what worked instead of starting fresh every time.

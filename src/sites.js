@@ -146,18 +146,29 @@ async function wpUploadImage(site, auth, image, title) {
   return { id: media.id, url: media.source_url };
 }
 
+function seoSlug(s, max = 70) {
+  return String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, max).replace(/-+$/g, '') || '';
+}
+
 // image: { buffer, mime, filename, alt, credit } (optional)
 // schema: a JSON-LD object (optional), added to the post as a script tag
-async function publish(site, secret, article, fileText, { status = 'draft', categories = '', tags = '', image = null, schema = null } = {}) {
+// seo: { focusKeyphrase, secondary:[] } (optional) → sets slug + Rank Math/Yoast fields
+async function publish(site, secret, article, fileText, { status = 'draft', categories = '', tags = '', image = null, schema = null, seo = null } = {}) {
   const parts = splitArticle(fileText);
   const title = parts.title || article.title;
   const ld = (s) => `\n<script type="application/ld+json">${JSON.stringify(s).replace(/</g, '\\u003c')}</script>\n`;
+  const focus = (seo && String(seo.focusKeyphrase || '').trim()) || '';
 
   if (site.type === 'wordpress') {
     const auth = { user: site.username, pass: secret };
     const notes = [];
     let media = null;
     if (image) {
+      // Make sure the featured image's alt text carries the keyphrase.
+      if (focus && !String(image.alt || '').toLowerCase().includes(focus.toLowerCase())) {
+        image = { ...image, alt: image.alt ? `${image.alt} — ${focus}` : focus };
+      }
       try { media = await wpUploadImage(site, auth, image, title); } catch (e) { notes.push(`Featured image not uploaded: ${e.message}`); }
     }
     if (schema && media && media.url) {
@@ -170,12 +181,36 @@ async function publish(site, secret, article, fileText, { status = 'draft', cate
     const tgs = await wpTermIds(site, auth, 'tags', splitList(tags));
     if (cats.length) body.categories = cats;
     if (tgs.length) body.tags = tgs;
+    // SEO: a clean, keyphrase-led slug and the focus keyphrase + meta description
+    // for whichever SEO plugin is installed (Rank Math or Yoast). Extra meta keys
+    // are harmless on sites that don't use them.
+    const slug = seoSlug(focus) || seoSlug(title);
+    if (slug) body.slug = slug;
+    const metaDesc = parts.excerpt || '';
+    const meta = {};
+    if (focus) {
+      const list = [focus, ...((seo && seo.secondary) || [])].filter(Boolean).join(', ');
+      meta.rank_math_focus_keyword = list;
+      meta._yoast_wpseo_focuskw = focus;
+    }
+    if (metaDesc) { meta.rank_math_description = metaDesc; meta._yoast_wpseo_metadesc = metaDesc; }
+    if (Object.keys(meta).length) body.meta = meta;
     const post = await wpRequest(site, auth, '/wp/v2/posts', { method: 'POST', body });
     if (schema) {
       const raw = post.content && post.content.raw;
       if (typeof raw === 'string' && !raw.includes('application/ld+json')) notes.push('WordPress removed the schema markup because this user may not add scripts. Connect with an Administrator account, or add the schema with your SEO plugin.');
     }
-    return { remoteId: post.id, url: post.link, editUrl: `${site.url}/wp-admin/post.php?post=${post.id}&action=edit`, status: post.status, mediaId: media ? media.id : null, imageUrl: media ? media.url : null, notes };
+    // Verify the focus keyphrase actually saved; if the SEO plugin doesn't accept
+    // it over the API, tell the owner exactly what to set by hand.
+    if (focus) {
+      try {
+        const check = await wpRequest(site, auth, `/wp/v2/posts/${post.id}`, { query: { context: 'edit', _fields: 'meta' } });
+        const m = (check && check.meta) || {};
+        const saved = String(m.rank_math_focus_keyword || m._yoast_wpseo_focuskw || '').toLowerCase().includes(focus.toLowerCase());
+        if (!saved) notes.push(`Couldn't set the SEO focus keyphrase over the API (your SEO plugin may block it). Open the post and set the focus keyphrase to "${focus}" — the content, slug and meta description are already optimised for it.`);
+      } catch { /* non-fatal: the post is still published */ }
+    }
+    return { remoteId: post.id, url: post.link, editUrl: `${site.url}/wp-admin/post.php?post=${post.id}&action=edit`, status: post.status, mediaId: media ? media.id : null, imageUrl: media ? media.url : null, focusKeyphrase: focus || null, notes };
   }
 
   if (site.type === 'webhook') {
@@ -183,7 +218,11 @@ async function publish(site, secret, article, fileText, { status = 'draft', cate
       event: 'article.created',
       status,
       title,
+      slug: seoSlug(focus) || seoSlug(title),
       excerpt: parts.excerpt,
+      metaDescription: parts.excerpt,
+      focusKeyphrase: focus || null,
+      secondaryKeyphrases: (seo && seo.secondary) || [],
       markdown: parts.markdown,
       html: parts.html,
       writer: article.writerName,
@@ -238,4 +277,4 @@ function memoryText(site, cap = 40000) {
   return out;
 }
 
-module.exports = { normalizeUrl, wpDiscover, wpAuthorizeUrl, wpVerify, wpRequest, wpUploadImage, publish, test, splitArticle, memoryText };
+module.exports = { normalizeUrl, wpDiscover, wpAuthorizeUrl, wpVerify, wpRequest, wpUploadImage, publish, test, splitArticle, memoryText, seoSlug };

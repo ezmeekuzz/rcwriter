@@ -57,14 +57,23 @@ function buildPrompts(writer, picked, recentTitles) {
     writer.instructions?.trim() && `## Standing instructions\n${writer.instructions.trim()}`,
     writer.siteContext && `## Your website\n${writer.siteContext}`,
     [
+      '## SEO best practices (follow every point)',
+      '- Target ONE main keyphrase. If the task gives a target keyword, use exactly that as the keyphrase; otherwise pick a clear, specific keyphrase for the subject.',
+      '- Put the keyphrase in the title (near the beginning; keep the title under ~60 characters), in the first sentence or two, in at least one H2 heading, and naturally 2 to 4 times in the body. Never keyword-stuff.',
+      '- Open with a short, direct intro that answers the search intent in the first 100 words.',
+      '- Structure for readability: descriptive H2/H3 subheadings, short paragraphs (2 to 4 sentences), and bullet or numbered lists where they help. Most paragraphs under 120 words.',
+      '- Link to at least one authoritative EXTERNAL source, and to relevant pages on this website where natural (use the website list above) with descriptive anchor text — not "click here".',
+      '- Cover the related searches given in the task, and write genuinely useful depth (at least the target length).',
+      '- End with a short "## FAQ" of 2 to 3 real questions as H3s with concise answers.',
+      '',
       '## Output format',
       `- Write in ${writer.language?.trim() || 'English'}.`,
-      `- Aim for roughly ${words} words.`,
+      `- Aim for at least ${words} words.`,
       '- Return only the finished article in Markdown.',
       "- The first line must be the title as a single H1 ('# Title').",
       '- Do not add any preamble, notes to the user, or commentary about the task.',
-      writer.includeMeta ? '- After the article, add a line containing only "---", then "Meta description: " followed by a description under 155 characters.' : null
-    ].filter(Boolean).join('\n')
+      '- After the article, add a line containing only "---", then "Meta description: " followed by a compelling description of 140 to 155 characters that includes the keyphrase and invites the click.'
+    ].join('\n')
   ].filter(Boolean).join('\n\n');
 
   let task;

@@ -523,6 +523,12 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
       broadcast();
       await pipeline.afterWrite(writer, article, note);
     }
+    if (!article.keyword) {
+      jobs.get(jobId).step = 'Finding the focus keyphrase';
+      broadcast();
+      try { const k = await pipeline.deriveKeyphrase(writer, article); if (k) { article.keyword = k; store.log('info', `${writer.name} set the focus keyphrase "${k.keyword}" for "${article.title}".`); } }
+      catch (e) { note(`couldn't work out a focus keyphrase (${e.message}); publishing without it.`); }
+    }
     d.articles.unshift(article);
     if (brain) { try { const st = d.sites.find((x) => x.id === writer.siteId); brain.log({ type: 'action', summary: `Wrote "${article.title}" (${article.words} words) with ${writer.name}`.slice(0, 200), reasoning: article.keyword ? `Targeted keyword "${article.keyword.keyword}".` : '', details: { writer: writer.name, words: article.words, site: st ? st.name : '' }, outcome: 'succeeded', importance: 3, tags: ['article', writer.name].concat(st ? [st.name] : []) }); } catch { /* ignore */ } }
     store.log('article', `${writer.name} wrote "${article.title}" (${article.words} words).`, { articleId: article.id });
@@ -730,7 +736,10 @@ async function publishArticle(articleId, siteId, opts = {}) {
     const image = opts.includeImage === false ? null : pipeline.imageFor(article);
     let schema = null;
     try { schema = pipeline.schemaFor(writer, article, site); } catch { /* publish without it */ }
-    const res = await sites.publish(site, siteSecret(site), article, text, { ...opts, image, schema });
+    const seo = article.keyword && article.keyword.keyword
+      ? { focusKeyphrase: article.keyword.keyword, secondary: (article.keyword.secondary || []).slice(0, 4) }
+      : null;
+    const res = await sites.publish(site, siteSecret(site), article, text, { ...opts, image, schema, seo });
     const { notes = [], ...rest } = res;
     article.published = { ...rest, siteId: site.id, siteName: site.name, at: new Date().toISOString() };
     delete article.publishError;
