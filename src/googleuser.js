@@ -155,7 +155,9 @@ function createGoogleUser({ store, openExternal }) {
 
   function mime({ to, subject, text, html, inReplyTo, references, from }) {
     const boundary = `rcw${crypto.randomBytes(8).toString('hex')}`;
+    const clean = (s) => String(s || '').replace(/[\r\n]+/g, ' ').trim(); // no header injection / stray newlines
     const enc = (s) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s).toString('base64')}?=`);
+    to = clean(to); subject = clean(subject);
     const head = [from ? `From: ${from}` : null, `To: ${to}`, `Subject: ${enc(subject)}`, 'MIME-Version: 1.0',
       inReplyTo ? `In-Reply-To: ${inReplyTo}` : null, inReplyTo ? `References: ${[references, inReplyTo].filter(Boolean).join(' ')}` : null].filter(Boolean);
     if (!html) return `${head.join('\r\n')}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${Buffer.from(text).toString('base64')}`;

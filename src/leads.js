@@ -75,9 +75,11 @@ function createLeads({ store, ai, guser, google, htmlToPdf, notify, onChange, ad
         const x = await crawler.extract(lead, { ...crawl, emails: [...emails], phones: [...phones] });
         if (x.contactPerson) lead.contactPerson = x.contactPerson;
         if (x.contactRole) lead.contactRole = x.contactRole;
-        if (x.contactEmail && /@/.test(x.contactEmail) && !BAD_EMAIL.test(x.contactEmail)) { emails.add(x.contactEmail.toLowerCase()); lead.email = x.contactEmail.toLowerCase(); }
+        const cleanEmail = (e) => { const m = (String(e || '').match(EMAIL_RE) || [])[0]; return m && !BAD_EMAIL.test(m) ? m.toLowerCase() : null; };
+        const cx = cleanEmail(x.contactEmail);
+        if (cx) { emails.add(cx); lead.email = cx; }
         lead.people = (x.people || []).filter((p) => p && p.name).slice(0, 12);
-        for (const p of lead.people) { if (p.email && /@/.test(p.email)) emails.add(String(p.email).toLowerCase()); if (p.phone) phones.add(p.phone); }
+        for (const p of lead.people) { const pe = cleanEmail(p.email); if (pe) emails.add(pe); if (p.phone) phones.add(p.phone); }
         for (const k of ['description', 'openingHours', 'founded', 'teamSize', 'notes']) if (x[k]) lead[k] = x[k];
         if ((x.services || []).length) lead.services = x.services.slice(0, 12);
         if (x.address && !lead.address) lead.address = x.address;
@@ -189,8 +191,27 @@ function createLeads({ store, ai, guser, google, htmlToPdf, notify, onChange, ad
     return deliver(lead, { subject: stepIndex === 0 ? e.subject : `Re: ${lead.subject || e.subject}`, body: e.body, step: stepIndex });
   }
 
+  // The first well-formed, non-junk email for a lead, or null. Guards against
+  // malformed addresses (e.g. no top-level domain) that Gmail rejects with
+  // "Invalid To header".
+  function pickRecipient(lead) {
+    for (const cand of [lead.email, ...(lead.emails || [])]) {
+      const m = (String(cand || '').match(EMAIL_RE) || [])[0];
+      if (m && !BAD_EMAIL.test(m)) return m.toLowerCase();
+    }
+    return null;
+  }
+
   async function deliver(lead, { subject, body, step }) {
-    const msg = { to: lead.email, subject, text: body };
+    const to = pickRecipient(lead);
+    if (!to) {
+      delete lead.pendingEmail;
+      lead.error = `No valid email address to send to${lead.email ? ` (got "${lead.email}")` : ''}. Open the lead, add a correct email, then try again.`;
+      store.save(); onChange();
+      throw new Error(lead.error);
+    }
+    if (lead.email !== to) lead.email = to; // keep the cleaned address
+    const msg = { to, subject, text: body };
     if (step > 0 && lead.threadId) Object.assign(msg, { threadId: lead.threadId, inReplyTo: lead.messageId, references: lead.messageId });
     const r = await guser.send(msg);
     countSend();
