@@ -78,30 +78,44 @@ function createPipeline({ store, providers, builtins, auditor, providerConfig, p
   }
 
   // ---------- after writing ----------
-  async function afterWrite(writer, article, log) {
+  async function afterWrite(writer, article, log, progress) {
     const ai = aiFor(writer);
     if (writer.qualityCheck) {
       const min = Math.max(1, Math.min(10, Number(writer.qualityMinScore) || 7));
+      // How many times to revise while still below the minimum. 0 = check only.
+      const maxTries = writer.qualityRevise === false ? 0 : Math.max(0, Math.min(8, Number(writer.qualityMaxTries ?? 3)));
       try {
         const knowledge = [String(writer.knowledge || '').trim(), generator.readKnowledgeFiles(writer.knowledgeFiles)].filter(Boolean).join('\n\n');
         let text = readBody(article);
         let q = await enhance.qualityCheck({ writer, knowledge, text, ai });
-        const first = q;
-        if (writer.qualityRevise !== false && (q.mustFix || q.score < min) && q.issues.length) {
+        const firstScore = q.score;
+        const firstIssues = q.issues;
+        let tries = 0;
+        let bestText = text;
+        let bestQ = q;
+        // Keep revising until it meets the minimum (and has no must-fix), or we run
+        // out of attempts. Each round feeds the latest issues back in. We keep the
+        // best-scoring version so a revision never makes the article worse.
+        while (tries < maxTries && (q.mustFix || q.score < min) && q.issues.length) {
+          tries += 1;
+          if (typeof progress === 'function') progress(`Revising to reach the minimum score (try ${tries} of ${maxTries}, now ${q.score}/10)`);
           try {
             const { system } = generator.buildPrompts(writer, { mode: 'open' }, []);
             const revised = await enhance.revise({ system, text, issues: q.issues, ai, maxTokens: Number(writer.maxTokens) || 8000 });
-            enhance.rewriteBody(article.path, revised);
             text = revised;
-            article.title = generator.extractTitle(revised);
-            article.words = generator.countWords(revised);
             q = await enhance.qualityCheck({ writer, knowledge, text, ai });
-            q.revised = true;
-            q.firstScore = first.score;
-            q.firstIssues = first.issues;
-          } catch (e) { log(`Couldn't revise "${article.title}": ${e.message}`); }
+            if (q.score >= bestQ.score) { bestQ = q; bestText = revised; }
+          } catch (e) { log(`Couldn't revise "${article.title}" (try ${tries}): ${e.message}`); break; }
         }
-        article.quality = { ...q, min, passed: q.score >= min && !q.mustFix, checkedAt: new Date().toISOString() };
+        // Keep the best version we produced.
+        if (bestText !== readBody(article)) {
+          enhance.rewriteBody(article.path, bestText);
+          article.title = generator.extractTitle(bestText);
+          article.words = generator.countWords(bestText);
+        }
+        q = bestQ;
+        article.quality = { ...q, min, tries, revised: tries > 0, firstScore, firstIssues, passed: q.score >= min && !q.mustFix, checkedAt: new Date().toISOString() };
+        if (tries > 0) log(`Quality of "${article.title}": ${firstScore}/10 → ${q.score}/10 after ${tries} revision${tries > 1 ? 's' : ''} (minimum ${min}).`);
       } catch (e) {
         article.quality = { error: e.message, passed: false, checkedAt: new Date().toISOString() };
         log(`Quality check of "${article.title}" didn't run: ${e.message}`);

@@ -499,7 +499,7 @@ async function loadReader() {
       : a.publishError ? `<p class="warn">Not published: ${esc(a.publishError)}</p>` : '';
     const q = a.quality;
     const qual = q ? (q.error ? `<p class="warn">Quality check didn't run: ${esc(q.error)}</p>` : `
-      <details class="quality ${q.passed ? 'ok' : 'low'}"><summary><strong>Quality ${q.score}/10</strong>${q.revised ? ` after one revision (first draft ${q.firstScore}/10)` : ''}${q.passed ? '' : `, below your minimum of ${q.min}${a.heldForQuality ? ', so it was saved as a draft' : ''}`}${q.issues && q.issues.length ? `. ${q.issues.length} note${q.issues.length > 1 ? 's' : ''}` : ''}</summary>
+      <details class="quality ${q.passed ? 'ok' : 'low'}"><summary><strong>Quality ${q.score}/10</strong>${q.tries ? ` after ${q.tries} revision${q.tries > 1 ? 's' : ''} (first draft ${q.firstScore}/10)` : ''}${q.passed ? '' : `, below your minimum of ${q.min}${a.heldForQuality ? ', so it was saved as a draft' : ''}`}${q.issues && q.issues.length ? `. ${q.issues.length} note${q.issues.length > 1 ? 's' : ''}` : ''}</summary>
         ${q.issues && q.issues.length ? `<ul>${q.issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : '<p class="small">No problems found.</p>'}</details>`) : '';
     const kw = a.keyword ? `<p class="muted small">Target keyword: <strong>${esc(a.keyword.keyword)}</strong>${a.keyword.volume ? `, ${esc(a.keyword.volume)} searches a month` : ''}${a.keyword.difficulty !== null && a.keyword.difficulty !== undefined ? `, difficulty ${esc(a.keyword.difficulty)}` : ''}. ${esc(a.keyword.why || '')}</p>` : '';
     const img = a.image ? `<figure class="feature"><img src="${esc(fileUrl(a.image.path))}" alt="${esc(a.image.alt)}"><figcaption>Alt text: ${esc(a.image.alt)}${a.image.credit ? ` · ${esc(a.image.credit)}` : ''}</figcaption></figure>` : a.imageError ? `<p class="warn">No featured image: ${esc(a.imageError)}</p>` : '';
@@ -670,7 +670,7 @@ function blankWriter() {
     topics: '', topicMode: 'rotate', language: 'English', targetWords: 1200,
     provider: firstProvider, model: '', temperature: '', maxTokens: 8000, avoidRepeats: true, includeMeta: false,
     siteId: '', publishStatus: 'draft', wpCategories: '', wpTags: '',
-    qualityCheck: true, qualityMinScore: 7, qualityRevise: true, imageSource: 'none', schemaTypes: [], business: {}, linkOlderPosts: 'off', researchConnectorIds: []
+    qualityCheck: true, qualityMinScore: 7, qualityMaxTries: 3, publishBelowMin: false, imageSource: 'none', schemaTypes: [], business: {}, linkOlderPosts: 'off', researchConnectorIds: []
   };
 }
 
@@ -767,9 +767,10 @@ function writerModalHtml(d) {
         <fieldset><legend>Before publishing</legend>
           <label class="check"><input type="checkbox" name="qualityCheck" data-change="writer-rerender" ${d.qualityCheck ? 'checked' : ''}><span><strong>Have an AI editor check each article</strong><br><span class="muted small">Checks facts against the knowledge, the instructions, voice and length, and scores it out of 10.</span></span></label>
           ${d.qualityCheck ? `<div class="grid-2" style="margin-left:26px">
-            <div class="field"><label for="w-qmin">Minimum score to publish</label><input type="number" id="w-qmin" name="qualityMinScore" min="1" max="10" value="${esc(d.qualityMinScore || 7)}"><span class="hint">Below this, the article is saved as a draft instead of going live.</span></div>
-            <div class="field"><span class="label">&nbsp;</span><label class="check"><input type="checkbox" name="qualityRevise" ${d.qualityRevise !== false ? 'checked' : ''}><span>Rewrite once to fix what the editor found</span></label></div>
-          </div>` : ''}
+            <div class="field"><label for="w-qmin">Minimum score to publish</label><input type="number" id="w-qmin" name="qualityMinScore" min="1" max="10" value="${esc(d.qualityMinScore || 7)}"><span class="hint">The editor keeps rewriting until the article reaches this score.</span></div>
+            <div class="field"><label for="w-qtries">Revision attempts</label><input type="number" id="w-qtries" name="qualityMaxTries" min="0" max="8" value="${esc(d.qualityMaxTries ?? 3)}"><span class="hint">How many times to rewrite while still below the minimum. 0 = check only, never rewrite.</span></div>
+          </div>
+          <label class="check" style="margin-left:26px"><input type="checkbox" name="publishBelowMin" ${d.publishBelowMin ? 'checked' : ''}><span>Publish even if it never reaches the minimum<br><span class="muted small">After all attempts, publish at the chosen status anyway. Off: it's saved as a draft for you to review.</span></span></label>` : ''}
           <div class="grid-2">
             <div class="field"><label for="w-img">Featured image</label><select id="w-img" name="imageSource">
               <option value="none" ${!d.imageSource || d.imageSource === 'none' ? 'selected' : ''}>No image</option>
@@ -827,6 +828,7 @@ function readWriterForm() {
   if (root.querySelector('[name=schemaType]')) d.schemaTypes = [...root.querySelectorAll('[name=schemaType]:checked')].map((el) => el.value);
   if (root.querySelector('[name^="biz."]')) { d.business = { ...(d.business || {}) }; root.querySelectorAll('[name^="biz."]').forEach((el) => { d.business[el.name.slice(4)] = el.value.trim(); }); }
   d.qualityMinScore = Math.max(1, Math.min(10, Number(d.qualityMinScore) || 7));
+  d.qualityMaxTries = Math.max(0, Math.min(8, Number(d.qualityMaxTries ?? 3)));
   if (root.querySelector('[name="soc.enabled"]')) {
     const q = (n) => root.querySelector(`[name="${n}"]`);
     d.social = { enabled: q('soc.enabled').checked, mode: q('soc.mode') ? q('soc.mode').value : 'approve',

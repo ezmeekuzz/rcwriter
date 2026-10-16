@@ -521,7 +521,7 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
     if (writer.qualityCheck || (writer.imageSource && writer.imageSource !== 'none') || (writer.schemaTypes || []).length) {
       jobs.get(jobId).step = writer.qualityCheck ? 'Checking quality' : 'Finishing';
       broadcast();
-      await pipeline.afterWrite(writer, article, note);
+      await pipeline.afterWrite(writer, article, note, (step) => { try { jobs.get(jobId).step = step; broadcast(); } catch { /* ignore */ } });
     }
     if (!article.keyword) {
       jobs.get(jobId).step = 'Finding the focus keyphrase';
@@ -536,13 +536,19 @@ async function runWriter(writerId, { topic = '', schedule = null, silent = false
     store.save();
 
     let publishNote = '';
-    if (article.quality && article.quality.score) publishNote += `\nQuality ${article.quality.score}/10${article.quality.revised ? ' after one revision' : ''}`;
+    if (article.quality && article.quality.score) publishNote += `\nQuality ${article.quality.score}/10${article.quality.tries ? ` after ${article.quality.tries} revision${article.quality.tries > 1 ? 's' : ''}` : ''}`;
     if (writer.siteId && writer.publishStatus && writer.publishStatus !== 'none') {
       let status = writer.publishStatus;
+      // If quality is below the minimum after all revision attempts, hold it as a
+      // draft — unless the writer is set to publish anyway.
       if (writer.qualityCheck && article.quality && !article.quality.passed && ['publish', 'private'].includes(status)) {
-        status = 'draft';
-        store.log('info', `"${article.title}" was saved as a draft instead of being published, because the quality check ${article.quality.score ? `scored it ${article.quality.score}/10 (minimum ${article.quality.min})` : "couldn't run"}${article.quality.mustFix ? ' and found something that must be fixed' : ''}.`, { articleId: article.id });
-        article.heldForQuality = true;
+        if (writer.publishBelowMin) {
+          store.log('info', `"${article.title}" is being published even though the quality check ${article.quality.score ? `scored it ${article.quality.score}/10 (minimum ${article.quality.min})` : "couldn't run"}${article.quality.tries ? ` after ${article.quality.tries} revision${article.quality.tries > 1 ? 's' : ''}` : ''}, because this writer is set to publish regardless.`, { articleId: article.id });
+        } else {
+          status = 'draft';
+          store.log('info', `"${article.title}" was saved as a draft instead of being published, because the quality check ${article.quality.score ? `scored it ${article.quality.score}/10 (minimum ${article.quality.min})` : "couldn't run"}${article.quality.tries ? ` after ${article.quality.tries} revision${article.quality.tries > 1 ? 's' : ''}` : ''}${article.quality.mustFix ? ' and found something that must be fixed' : ''}. Turn on "Publish even if below the minimum" for this writer to publish anyway.`, { articleId: article.id });
+          article.heldForQuality = true;
+        }
       }
       try {
         jobs.get(jobId).step = 'Publishing';
